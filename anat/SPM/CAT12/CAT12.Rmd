@@ -1,0 +1,40 @@
+---
+title: "CAT12"
+author: "Niklas Wulms"
+date: "2/27/2020"
+output: html_document
+---
+
+
+```{r setup, include=FALSE}
+library(dplyr)
+library(tidyr)
+library(stringr)
+library(logger)
+
+log_threshold(DEBUG)
+
+knitr::opts_chunk$set(echo = TRUE)
+
+bids_source_dir <- "/mnt/TB8Drive/bidirect2bids/bids/sourcedata/"
+
+bids_derivatives_temp_dir <- "/media/niklas/Vierer/BIDS/derivatives_temp/SPM/LST"
+  
+bids_derivatives_dir <- "/media/niklas/Vierer/BIDS/derivatives_temp/SPM/CAT12"
+  
+source("../../../functions/general.R")
+source("../../../bids/bids_functions.R")
+
+```
+
+```{r}
+copy_BIDS(BIDS_sourcedata_dir = bids_source_dir, 
+          BIDS_tag = "T1w.nii", 
+          seq_n = 1, 
+          BIDS_derivatives_temp_dir = bids_derivatives_dir,
+          gunzip = TRUE)
+```
+
+# Switching to SPM processing
+
+From here on running SPM interface and the batches included in the repository folder
