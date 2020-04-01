@@ -20,7 +20,7 @@ bids_source_dir <- "/mnt/TB8Drive/bidirect2bids/bids/sourcedata/"
 
 bids_derivatives_temp_dir <- "/media/niklas/Vierer/BIDS/derivatives_temp/SPM/LST"
   
-bids_derivatives_dir <- "/media/niklas/Vierer/BIDS/derivatives_temp/SPM/CAT12"
+bids_derivatives_dir_CAT12 <- "/mnt/Storage1/bidirect_processing/BIDS/derivatives_temp/SPM/CAT12"
   
 source("../../../functions/general.R")
 source("../../../bids/bids_functions.R")
@@ -38,3 +38,130 @@ copy_BIDS(BIDS_sourcedata_dir = bids_source_dir,
 # Switching to SPM processing
 
 From here on running SPM interface and the batches included in the repository folder
+
+# After processing XML readout!
+
+```{r}
+cat12_xml <- tibble(xml = list.files(bids_derivatives_dir_CAT12,
+                               recursive = TRUE,
+                               pattern = ".xml",
+                               all.files = TRUE,
+                               full.names = TRUE),
+                   subject = str_extract(xml, "sub-[:digit:]{5}"),
+                   session = str_extract(xml, "ses-s[:digit:]{1}")
+                   )
+
+cat12_xml_filter <- cat12_xml %>%
+  filter(!str_detect(subject, "30556"))
+
+cat12_xml_roi <- cat12_xml_filter %>%
+  filter(str_detect(xml, "ROI"))
+
+cat12_xml_vol <- cat12_xml_filter %>%
+  filter(!str_detect(xml, "ROI"))
+```
+
+
+```{r}
+read_xml_data <- function(xml_file){
+  xmldoc <- xmlParse(xml_file)
+  xml_data <- xmlToList(xmldoc)
+  
+  return(xml_data)
+}
+```
+
+
+```{r}
+extract_measures <- function(xml_file){
+  xmldoc <- xmlParse(xml_file)
+  xml_data <- xmlToList(xmldoc)
+
+  measures <- data.frame(t(sapply(xml_data$subjectmeasures, c)), stringsAsFactors = FALSE) %>%
+  mutate(vol_abs_CGW = str_remove_all(vol_abs_CGW, "\\[|\\]"),
+         vol_rel_CGW = str_remove_all(vol_rel_CGW, "\\[|\\]")
+         ) %>%
+  separate(vol_abs_CGW, into = c("vol_abs_CSV", "vol_abs_GM", "vol_abs_WM", "vol_abs_WMH", "empty1"), sep = " ") %>% 
+  separate(vol_rel_CGW, into = c("vol_rel_CSV", "vol_rel_GM", "vol_rel_WM", "vol_rel_WMH", "empty2"), sep = " ") %>%
+  mutate_if(is.character, as.numeric) %>%
+  mutate(xml_name = xml_data$filedata$file,
+         subject = str_extract(xml_name, "sub-[:digit:]{5}"),
+         session = str_extract(xml_name, "ses-s[:digit:]{1}")) %>%
+  select(-contains("empty")) %>%
+  select(xml_name, subject, session, everything())
+  
+  return(measures)
+
+}
+```
+
+
+```{r}
+```
+
+```{r}
+filename = paste0(bids_derivatives_dir_CAT12, "/cat12_volume.csv")
+if(file.exists(filename)){file.remove(filename)}
+
+for (i in seq(cat12_xml_vol$xml)) {
+  print(i)
+  df_new <- extract_measures(cat12_xml_vol$xml[i])
+
+  if(file.exists(filename)){
+    readr::write_csv(df_new, path = filename,
+                     append = TRUE)
+  } else {
+    readr::write_csv(df_new, path = filename,
+                     append = FALSE)
+  }
+}
+```
+
+# CAT 12 XML ROU
+
+```{r}
+extract_measures_ROI <- function(xml_file){
+  
+  xmldoc <- xmlParse(xml_file)
+  xml_data <- xmlToList(xmldoc)
+  
+  csf_ROI <- tibble(file = xml_file,
+                  names = xml_data$neuromorphometrics$names %>% paste(), 
+                  ROI_csf_volume = xml_data$neuromorphometrics$data$Vcsf %>% str_remove_all("\\[|\\]") %>% str_split(";") %>% unlist() %>% as.numeric()
+                  ) %>%
+    pivot_wider(names_from = names, values_from = ROI_csf_volume,
+              names_prefix = "csf_ROI_")
+  gm_ROI <- tibble(file = xml_file,
+                 names = xml_data$neuromorphometrics$names %>% paste(), 
+                 ROI_gm_volume = xml_data$neuromorphometrics$data$Vgm %>% str_remove_all("\\[|\\]") %>% str_split(";") %>% unlist() %>% as.numeric()
+                 ) %>%
+  pivot_wider(names_from = names, values_from = ROI_gm_volume,
+              names_prefix = "gm_ROI_")
+  
+  df <- full_join(csf_ROI, gm_ROI) %>%
+    mutate(subject = str_extract(file, "sub-[:digit:]{5}"),
+         session = str_extract(file, "ses-s[:digit:]{1}")) %>%
+    select(subject, session, file, everything())
+  return(df)
+}
+```
+
+```{r}
+filename = paste0(bids_derivatives_dir_CAT12, "/cat12_ROI_volume.csv")
+
+if(file.exists(filename)){file.remove(filename)}
+for (i in seq(cat12_xml_roi$xml)) {
+  print(i)
+  df_new <- extract_measures_ROI(cat12_xml_roi$xml[i])
+
+  print(cat12_xml_roi$xml[i])
+  
+  if(file.exists(filename)){
+    readr::write_csv(df_new, path = filename,
+                     append = TRUE)
+  } else {
+    readr::write_csv(df_new, path = filename,
+                     append = FALSE)
+  }
+}
+```

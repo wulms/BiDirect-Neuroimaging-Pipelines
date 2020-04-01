@@ -1,0 +1,62 @@
+---
+title: "fsl_anat"
+author: "Niklas Wulms"
+date: "3/30/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+library(dplyr)
+library(tidyr)
+library(stringr)
+library(logger)
+library(doParallel)
+library(foreach)
+
+log_threshold(DEBUG)
+
+knitr::opts_chunk$set(echo = TRUE)
+
+bids_source_dir <- "/media/niklas/My Book/bidirect2bids/bids/sourcedata/"
+
+bids_derivatives_temp_dir <- "/mnt/Vierer/BIDS/derivatives_temp/FSL/fsl_anat_pipeline"
+  
+bids_derivatives_dir_T1 <- paste0(bids_derivatives_temp_dir, "/T1w")
+bids_derivatives_dir_FLAIR <- paste0(bids_derivatives_temp_dir, "/FLAIR")
+
+source("fsl_anat.R")
+source("../../functions/general.R")
+source("../../bids/bids_functions.R")
+
+```
+
+```{r}
+copy_BIDS(BIDS_sourcedata_dir = bids_source_dir, 
+          BIDS_tag = "(FLAIR|T1w).nii", 
+          seq_n = 2, 
+          BIDS_derivatives_temp_dir = bids_derivatives_temp_dir,
+          gunzip = FALSE)
+```
+
+```{r}
+t1w <- list.files(bids_derivatives_temp_dir,
+                               recursive = TRUE,
+                               pattern = "T1w.nii",
+                               all.files = TRUE,
+                               full.names = TRUE)
+
+t1w_output <- paths_folder <- paste0(sub("[/][^/]+$", "", t1w), "/T1w")
+```
+
+```{r}
+  # Calculate the number of cores
+  no_cores <- detectCores() - 2
+  # Initiate cluster
+  cl <- makeCluster(no_cores, type="FORK", outfile = "")
+  getDoParWorkers()
+```
+
+```{r}
+invisible(fsl_anat(t1w, t1w_output))
+```
+
