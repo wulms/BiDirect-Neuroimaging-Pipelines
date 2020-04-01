@@ -23,7 +23,11 @@ bids_source_dir <- "/mnt/Storage1/bidirect2bids/bids/sourcedata/"
 bids_derivatives_dir_psmd <- "/mnt/Vierer/BIDS/derivatives_temp/FSL/PSMD"
 
 bids_derivatives_dir_msmd <- "/mnt/Vierer/BIDS/derivatives_temp/FSL/MSMD"
-  
+
+# PSMD files
+psmd_script <- "/home/niklas/Programme/psmd_new/psmd.sh"
+skeleton_mask <- "/home/niklas/Programme/psmd_new/skeleton_mask_2019.nii.gz"
+
 source("../functions/general.R")
 source("../bids/bids_functions.R")
 
@@ -48,32 +52,32 @@ dwi <- list.files(bids_derivatives_dir_psmd,
                                full.names = TRUE)
 ```
 
+# Start parallelization (used cores: max-2)
+
 ```{r}
-  # Calculate the number of cores
-  no_cores <- detectCores() - 2
-  # Initiate cluster
-  cl <- makeCluster(no_cores, type="FORK", outfile = "")
-  getDoParWorkers()
+
 ```
 
 
 ```{r}
 psmd <- function(dwi_input) {
+  # Starting parallel cluster
+  # Calculate the number of cores
+  no_cores <- detectCores() - 2
+  # Initiate cluster
+  cl <- makeCluster(no_cores, type="FORK", outfile = "")
+  getDoParWorkers()
+  registerDoParallel(cl)
   
-  psmd_script <- "/home/niklas/Programme/psmd_new/psmd.sh"
-  skeleton_mask <- "/home/niklas/Programme/psmd_new/skeleton_mask_2019.nii.gz"
-  
+  # Input filenames
   bval = str_replace(dwi_input, ".nii.gz", ".bval")
   bvec = str_replace(dwi_input, ".nii.gz", ".bvec")
+  # Output file and foldernames
   psmd_txt <- str_replace(dwi_input, "dwi.nii.gz", "psmd.txt")  
   folder <- sub("[/][^/]+$", "", dwi_input)
 
-
-  registerDoParallel(cl)
-
-  
   foreach (i = 1:length(dwi_input)) %dopar% {
-
+    # Shell command
     command <- paste0("bash ", psmd_script, " -t ", 
                       " -d ", dwi_input[i], 
                       " -b ", bval[i],
@@ -92,10 +96,13 @@ psmd <- function(dwi_input) {
 
 ```
 
+# Run function
 
 ```{r}
 psmd(dwi)
 ```
+
+# Read value from txt values
 
 ```{r}
 psmd_extraction <- function(txt_file){
@@ -106,6 +113,7 @@ psmd_extraction <- function(txt_file){
 }
 ```
 
+# Write to csv file
 
 ```{r}
 psmd_txt <- tibble(txt = list.files(bids_derivatives_dir_psmd,
@@ -123,7 +131,7 @@ readr::write_excel_csv(psmd_txt, path = paste0(bids_derivatives_dir_psmd, "/psmd
 
 
 
-# MSMD
+# MSMD (same structure as PSMD, some small changes to extract MSMD value)
 
 ```{r}
 copy_BIDS(BIDS_sourcedata_dir = bids_source_dir, 
@@ -143,32 +151,27 @@ dwi <- list.files(bids_derivatives_dir_msmd,
                                full.names = TRUE)
 ```
 
+# Function definition
+
 ```{r}
+msmd <- function(dwi_input) {
+  # Parallel cluster start
   # Calculate the number of cores
   no_cores <- detectCores() - 2
   # Initiate cluster
   cl <- makeCluster(no_cores, type="FORK", outfile = "")
   getDoParWorkers()
-```
-
-
-```{r}
-msmd <- function(dwi_input) {
+  registerDoParallel(cl)
   
-  psmd_script <- "/home/niklas/Programme/psmd_new/psmd.sh"
-  skeleton_mask <- "/home/niklas/Programme/psmd_new/skeleton_mask_2019.nii.gz"
-  
+  # File namings
   bval = str_replace(dwi_input, ".nii.gz", ".bval")
   bvec = str_replace(dwi_input, ".nii.gz", ".bvec")
+  # Output file and folders
   msmd_txt <- str_replace(dwi_input, "dwi.nii.gz", "msmd.txt")  
   folder <- sub("[/][^/]+$", "", dwi_input)
 
-
-  registerDoParallel(cl)
-
-  
   foreach (i = 1:length(dwi_input)) %dopar% {
-
+    # Shell command as string
     command <- paste0("bash ", psmd_script, " -o -t ", 
                       " -d ", dwi_input[i], 
                       " -b ", bval[i],
@@ -187,10 +190,13 @@ msmd <- function(dwi_input) {
 
 ```
 
+# Run function
 
 ```{r}
 msmd(dwi)
 ```
+
+# Write to csv file
 
 ```{r}
 msmd_txt <- tibble(txt = list.files(bids_derivatives_dir_msmd,
