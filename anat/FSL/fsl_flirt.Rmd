@@ -1,0 +1,218 @@
+---
+title: "FSL FLIRT"
+author: "Niklas Wulms"
+date: "4/22/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+library(stringr)
+library(doParallel)
+library(foreach)
+library(tidyr)
+library(dplyr)
+
+source("fsl_flirt.R")
+source("fsl_bet.R")
+source("../../functions/general.R")
+
+knitr::opts_chunk$set(echo = TRUE)
+
+working_dir <- "/mnt/Vierer/BIDS/derivatives_temp/FSL/"
+knitr::opts_knit$set(root.dir = working_dir)
+setwd(working_dir)
+```
+
+# Bet of T2 (errors in fsl_anat pipeline)
+
+
+```{r}
+fsl_anat_nii_selection_t2 <- data.frame(
+  # raw input and first preprocs
+  T2_biascorr = list.files("/mnt/Vierer/BIDS/derivatives_temp/FSL/fsl_anat_pipeline/", "T2_biascorr.nii.gz", recursive = TRUE, full.names = TRUE),
+  stringsAsFactors = F)             
+
+fsl_anat_nii_selection_t2  
+```
+
+```{r}
+fsl_bet(fsl_anat_nii_selection_t2$T2_biascorr,
+        fval=seq(0.3, 0.7, 0.2))
+```
+
+
+
+# Flirt of processed BET images
+
+```{r}
+nii_files <- tibble(
+  # raw input and first preprocs
+  T2_biascorr_BET  = list.files("/mnt/Vierer/BIDS/derivatives_temp/FSL/fsl_bet_pipeline/", 
+                                "T2_0.5_biascorr.nii.gz", recursive = TRUE, full.names = TRUE),
+  T1_BET = str_replace(T2_biascorr_BET, "fsl_bet_pipeline",  "fsl_anat_pipeline") %>%
+    str_replace("T2_0.5_biascorr.nii.gz", "T1_biascorr_brain.nii.gz") %>%
+    str_replace("FLAIR.anat", "T1w.anat"),
+  T2_biascorr  = str_replace(T2_biascorr_BET, "fsl_bet_pipeline",  "fsl_anat_pipeline") %>%
+    str_replace("T2_0.5_biascorr.nii.gz", "T2_biascorr.nii.gz")
+  )             
+
+nii_files  
+```
+
+
+```{r}
+fsl_flirt(input_volume = nii_files$T2_biascorr_BET,
+          input_reference = nii_files$T1_BET, 
+          prefix = "T1_space", 
+          dof = 6)
+
+fsl_flirt(input_volume = nii_files$T2_biascorr_BET,
+          input_reference = nii_files$T1_BET, 
+          prefix = "T1_space", 
+          dof = 12)
+```
+
+
+
+# Invert matrices
+
+```{r}
+mat_files <- list.files("/mnt/Vierer/BIDS/derivatives_temp/FSL/fsl_flirt_pipeline/", 
+                                 "(12|6).mat", recursive = TRUE, full.names = TRUE)
+
+
+# invert mat
+fsl_convert_xfm(mat_files)
+```
+
+# Bringing MNI matrix to T2 space
+
+```{r}
+mat_files_T1_to_MNI <- list.files("/mnt/Vierer/BIDS/derivatives_temp/FSL/fsl_anat_pipeline/", 
+                                "T1_to_MNI_lin.mat", recursive = TRUE, full.names = TRUE)
+mat_files_06 <- list.files("/mnt/Vierer/BIDS/derivatives_temp/FSL/fsl_flirt_pipeline/", 
+                                "_space_6.mat", recursive = TRUE, full.names = TRUE)
+mat_files_12 <- list.files("/mnt/Vierer/BIDS/derivatives_temp/FSL/fsl_flirt_pipeline/", 
+                                "_space_12.mat", recursive = TRUE, full.names = TRUE)
+# due to inconsisten file numbers - renaming of mat_files_06
+
+mat_files_to_MNI <- str_replace(mat_files_06, "fsl_flirt", "fsl_anat") %>%
+  str_replace("FLAIR.anat", "T1w.anat") %>%
+  str_replace("T2_0.5_biascorr_T1_space_6", "T1_to_MNI_lin")
+
+# concatenate mat (FLAIR_to_T1, T1_to_MNI_lin-> 1 MAT)
+fsl_convert_xfm_add_masks(input_mat1 = mat_files_06,
+                          input_mat2 = mat_files_to_MNI)
+fsl_convert_xfm_add_masks(input_mat1 = mat_files_12,
+                          input_mat2 = mat_files_to_MNI)
+```
+
+
+
+```{r}
+#file.rename(mat_files, mat_files_06)
+
+mat_files <- data.frame(mat = list.files("/mnt/Vierer/BIDS/derivatives_temp/FSL/fsl_flirt_pipeline/", 
+                                "_inverse", recursive = TRUE, full.names = TRUE),
+                        stringsAsFactors = FALSE)
+head(mat_files)
+
+mat_files <- mat_files %>%
+  mutate(type = str_extract(mat, "(6|12)_inverse"),
+         id = str_extract(mat, "sub-[:digit:]{5}/ses-s[:digit:]{1}")) %>%
+  spread(type, mat)
+```
+
+
+
+# Apply inverted matrix to T1 image, to bring it in FLAIR space
+
+Input: 
+-T1_BET pydeface raw
+-T1_BET fsldeface cropped
+
+Template:
+-T2_biascorr_BET
+
+```{r}
+output = str_replace(nii_files$T1_BET, ".nii", "_T2_space_6.nii") %>% str_replace("fsl_anat", "fsl_flirt")
+
+
+
+fsl_flirt_to_space(input_nii = nii_files$T1_BET,
+                   input_ref = nii_files$T2_biascorr_BET,
+                   input_mat = mat_files$`6_inverse`,
+                   output = output)
+
+output = str_replace(nii_files$T1_BET, ".nii", "_T2_space_12.nii") %>% str_replace("fsl_anat", "fsl_flirt")
+
+
+fsl_flirt_to_space(input_nii = nii_files$T1_BET,
+                   input_ref = nii_files$T2_biascorr_BET,
+                   input_mat = mat_files$`12_inverse`,
+                   output = output)
+
+```
+
+# Mask the T2 images, with the high-res T1 image (that is flirted to T2 space)
+
+```{r}
+nii_inverse <- data.frame(mat = list.files("/mnt/Vierer/BIDS/derivatives_temp/FSL/fsl_flirt_pipeline/", 
+                                "T2_space_(6|12).nii.gz", recursive = TRUE, full.names = TRUE),
+                        stringsAsFactors = FALSE)
+head(nii_inverse)
+
+nii_inverse <- nii_inverse %>%
+  mutate(type = str_extract(mat, "T2_space_(6|12)"),
+         id = str_extract(mat, "sub-[:digit:]{5}/ses-s[:digit:]{1}")) %>%
+  spread(type, mat)
+head(nii_inverse)
+```
+
+# The T1 image is now in T2 space (using T2_BET and T1_BET for FLIRT, as well as the inverse transformation matrix)
+
+Now, we want to apply the T1 BET mask to the T2 images, to enhance BET quality.
+
+```{r}
+fslmaths_mask(input_nii = nii_files$T2_biascorr,
+              input_mask = nii_inverse$T2_space_6)
+cat("\14")
+fslmaths_mask(input_nii = nii_files$T2_biascorr,
+              input_mask = nii_inverse$T2_space_12)
+
+```
+
+# Bringing FLAIR masks into T2_orig space
+
+```{r}
+nii_files <- data.frame(
+  # raw input and first preprocs
+  FLAIR = list.files("/mnt/458e8a35-865f-4f0e-ab7e-8b4ac8684363/WML121_BIDS/derivatives/FSL/3-FSL_pipeline/anat_FLAIR_defaced_pydeface/",
+                                             "T2.nii.gz", recursive = TRUE, full.names = TRUE),
+  FLAIR_mask = list.files("/mnt/458e8a35-865f-4f0e-ab7e-8b4ac8684363/WML121_BIDS/derivatives/manual/",
+                                             "mask.nii.gz", recursive = TRUE, full.names = TRUE),
+  FLAIR_to_FLAIR_orig  = list.files("/mnt/458e8a35-865f-4f0e-ab7e-8b4ac8684363/WML121_BIDS/derivatives/FSL/3-FSL_pipeline/anat_FLAIR_defaced_pydeface/", 
+                                "T2_orig2std.mat", recursive = TRUE, full.names = TRUE),
+  
+  stringsAsFactors = F)             
+
+
+output = str_replace(nii_files$FLAIR_mask, "manual", "FSL/5-FSL_FLIRT/manual") %>% str_replace("mask", "mask_T2_space") %>% str_replace("anat/", "")
+
+
+```
+
+```{r}
+fsl_flirt_to_space(input_nii = nii_files$FLAIR_mask,
+                   input_ref = nii_files$FLAIR,
+                   input_mat = nii_files$FLAIR_to_FLAIR_orig,
+                   output = output)
+```
+
+
+
+
+
+
+
+

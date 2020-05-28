@@ -38,6 +38,8 @@ copy_BIDS(BIDS_sourcedata_dir = bids_source_dir,
           gunzip = FALSE)
 ```
 
+# T1w
+
 ```{r}
 t1w <- list.files(bids_derivatives_temp_dir,
                                recursive = TRUE,
@@ -60,3 +62,27 @@ t1w_output <- paths_folder <- paste0(sub("[/][^/]+$", "", t1w), "/T1w")
 invisible(fsl_anat(t1w, t1w_output))
 ```
 
+
+# FLAIR
+
+```{r}
+flair <- list.files(bids_derivatives_temp_dir,
+                               recursive = TRUE,
+                               pattern = "FLAIR.nii",
+                               all.files = TRUE,
+                               full.names = TRUE)
+
+FLAIR_output <- paths_folder <- paste0(sub("[/][^/]+$", "", t1w), "/FLAIR")
+```
+
+```{r}
+  # Calculate the number of cores
+  no_cores <- detectCores() - 2
+  # Initiate cluster
+  cl <- makeCluster(no_cores, type="FORK", outfile = "")
+  getDoParWorkers()
+```
+
+```{r}
+invisible(fsl_anat_t2(flair, FLAIR_output))
+```

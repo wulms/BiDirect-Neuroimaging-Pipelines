@@ -34,3 +34,15 @@ file_gunzip <- function(input, output){
 }
 
 
+initialize_parallel <- function(not_use = 2) {
+  # Calculate the number of cores
+  no_cores <- detectCores() - not_use
+  
+  # Initiate cluster
+  cl <- makeCluster(no_cores, type = "FORK", outfile = "")
+  
+  registerDoParallel(cl)
+  getDoParWorkers()
+  return(cl)
+}
+

@@ -1,0 +1,130 @@
+---
+title: "fsl_BIANCA"
+author: "Niklas Wulms"
+date: "5/11/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+library(stringr)
+library(doParallel)
+library(foreach)
+library(tidyr)
+library(dplyr)
+
+source("fsl_flirt.R")
+source("fsl_bet.R")
+source("fsl_BIANCA.r")
+source("../../functions/general.R")
+
+knitr::opts_chunk$set(echo = TRUE)
+
+working_dir <- "/mnt/Vierer/BIDS/derivatives_temp/FSL/"
+knitr::opts_knit$set(root.dir = working_dir)
+setwd(working_dir)
+```
+
+
+```{r}
+nii_files <- tibble(
+  # raw input and first preprocs
+  T1w = list.files("/mnt/Vierer/BIDS/derivatives_temp/FSL/fsl_flirt_pipeline/",
+                     "T1_biascorr_brain_T2_space_6", recursive = TRUE, full.names = TRUE),
+  FLAIR = list.files("/mnt/Vierer/BIDS/derivatives_temp/FSL/fsl_flirt_pipeline/",
+                     "FLAIR_T1_space_brain_T2_space_6", recursive = TRUE, full.names = TRUE),
+  mat_file = list.files("/mnt/Vierer/BIDS/derivatives_temp/FSL/fsl_flirt_pipeline/", 
+                        "T2_0.5_biascorr_T1_space_6_FLAIR_to_MNI", recursive = TRUE, full.names = TRUE))             
+
+
+dir.create("/mnt/Vierer/BIDS/derivatives_temp/FSL/fsl_bianca_pipeline/")
+
+bianca_file <- "/mnt/Vierer/BIDS/derivatives_temp/FSL/fsl_bianca_pipeline/list_of_files.txt"
+
+
+nii_files %>%
+  write.table(file=bianca_file, 
+              quote=FALSE, sep='\t', col.names = FALSE, row.names = FALSE)
+
+
+```
+
+```{r}
+model121 <- "/home/niklas/Owncloud/wulms/BiDirect_Neuroimaging/BIANCA_classifier/output_classifier_121"
+model201 <- "/home/niklas/Owncloud/wulms/BiDirect_Neuroimaging/BIANCA_classifier/output_classifier_201"
+```
+
+```{r}
+application_bianca_classifiers(trained_models = c(model121), 
+                               test_sets = bianca_file,
+                               prefix = "model_121")
+```
+
+```{r}
+bianca_masks <- list.files(path = "/mnt/Vierer/BIDS/derivatives_temp/FSL/fsl_bianca_pipeline/", "_mask.nii.gz",
+           recursive = TRUE, 
+           full.names = TRUE)
+```
+
+
+
+
+```{r}
+
+masks <- tibble(bianca_masks = list.files(path = "/mnt/Vierer/BIDS/derivatives_temp/FSL/fsl_bianca_pipeline/", 
+                                          "_mask.nii.gz",
+                                          recursive = TRUE, 
+                                          full.names = TRUE),
+                threshold = 0.8,
+                bianca_output = str_replace(bianca_masks, ".nii.gz", "_volume.txt"))
+
+bianca_cluster_info(lesionmask = masks$bianca_masks, 
+                    threshold = masks$threshold,
+                    output_name = masks$bianca_output)
+
+```
+
+```{r}
+volume_extractor <- function(input_file, type){
+  if(type == "wmh_number"){
+    volume <- readLines(input_file)[1] %>% str_extract("(?<= is )[:digit:]*(\\.[:digit:]*$|$)")
+  }
+  else if(type == "total_wmh_volume"){
+    volume <- readLines(input_file)[2] %>% str_extract("(?<= is )[:digit:]*(\\.[:digit:]*$|$)")    
+  }
+  return(volume)
+}
+```
+
+
+
+```{r}
+setwd(working_dir)
+masks2 <- masks %>%
+  mutate(exists = file.exists(bianca_output),
+         wmh_number = lapply(bianca_output, volume_extractor, "wmh_number") %>% unlist(),
+         wmh_volume = lapply(bianca_output, volume_extractor, "total_wmh_volume") %>% unlist()
+         )
+```
+
+
+```{r}
+masks3 <- masks2 %>%
+  mutate(subject = str_extract(bianca_output, "sub-[:digit:]{5}"),
+         session = str_extract(bianca_output, "ses-s[:digit:]{1}")) %>%
+  select(subject, session, wmh_number, wmh_volume) 
+
+masks3 %>%
+  write.csv(file = "wmh_bianca_thresh08.csv", row.names = FALSE)
+```
+
+```{r}
+loo_bianca <- readRDS("/home/niklas/Owncloud/wulms/BD_variablen/permutations_BIANCA/wml121_bianca_masks.rds") %>%
+  filter(thresh == 0.8) %>%
+  mutate(session = str_replace(session, "ses-S", "ses-s")) %>%
+  filter(str_detect(input, "121")) %>%
+  select(subject, session, total_volume) %>%
+  left_join(masks3) %>%
+  mutate(wmh_volume = as.numeric(wmh_volume),
+         total_volume = as.numeric(total_volume))
+```
+

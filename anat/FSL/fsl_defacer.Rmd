@@ -1,0 +1,89 @@
+---
+title: "fsl_deface"
+author: "Niklas Wulms"
+date: "5/20/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+library(dplyr)
+library(tidyr)
+library(stringr)
+library(logger)
+library(doParallel)
+library(foreach)
+
+log_threshold(DEBUG)
+
+knitr::opts_chunk$set(echo = TRUE)
+
+bids_derivatives_temp_dir <- "/mnt/Vierer/BIDS/derivatives_temp/FSL/fsl_anat_pipeline"
+
+
+source("fsl_defacer.R")
+source("../../functions/general.R")
+source("../../bids/bids_functions.R")
+
+```
+
+```{r}
+inputs <- tibble(T1w = list.files(bids_derivatives_temp_dir, "T1w.nii.gz", recursive = TRUE, full.names = TRUE),
+                 FLAIR = str_replace(T1w, "T1w.nii.gz", "FLAIR.nii.gz"))
+
+inputs <- inputs %>%
+  filter(file.exists(FLAIR))
+
+sum(!file.exists(inputs$FLAIR))
+```
+
+
+```{r}
+outputs_deface <- tibble(T1w_reorient = str_replace(inputs$T1w, "fsl_anat_pipeline", "fsl_deface_pipeline") %>% str_replace("T1w", "T1w_r2std"),
+                  FLAIR_reorient = str_replace(inputs$FLAIR, "fsl_anat_pipeline", "fsl_deface_pipeline") %>% str_replace("FLAIR", "FLAIR_r2std"),
+                  T1w_crop = str_replace(inputs$T1w, "fsl_anat_pipeline", "fsl_deface_pipeline") %>% str_replace("T1w", "T1w_crop"),
+                  FLAIR_crop = str_replace(inputs$FLAIR, "fsl_anat_pipeline", "fsl_deface_pipeline") %>% str_replace("FLAIR", "FLAIR_crop"),
+                  T1w_fsldeface = str_replace(inputs$T1w, "fsl_anat_pipeline", "fsl_deface_pipeline") %>% str_replace("T1w", "T1w_fsldeface"),
+                  FLAIR_fsldeface = str_replace(inputs$FLAIR, "fsl_anat_pipeline", "fsl_deface_pipeline") %>% str_replace("FLAIR", "FLAIR_fsldeface"),
+                  T1w_fsldeface_bc = str_replace(inputs$T1w, "fsl_anat_pipeline", "fsl_deface_pipeline") %>% str_replace("T1w", "T1w_fsldeface_bc"),
+                  FLAIR_fsldeface_bc = str_replace(inputs$FLAIR, "fsl_anat_pipeline", "fsl_deface_pipeline") %>% str_replace("FLAIR", "FLAIR_fsldeface_bc"),
+                  T1w_anat = str_replace(inputs$T1w, "fsl_anat_pipeline", "fsl_deface_anat_pipeline") %>% 
+                    str_remove(".nii.gz") %>% 
+                    str_remove ("sub-[:digit:]{5}_ses-s[:digit:]{1}_"))
+```
+    
+# Reorient to std
+
+```{r}
+fsl_reorient(input = inputs$T1w, output = outputs_deface$T1w_reorient)
+fsl_reorient(input = inputs$FLAIR, output = outputs_deface$FLAIR_reorient)
+```
+
+
+# Crop images
+
+```{r}
+fsl_crop(input = outputs_deface$T1w_reorient, output = outputs_deface$T1w_crop)
+fsl_crop(input = outputs_deface$FLAIR_reorient, output = outputs_deface$FLAIR_crop)
+
+```
+
+
+# Deface
+
+```{r}
+defaceR(input = outputs_deface$T1w_crop, output = outputs_deface$T1w_fsldeface)
+defaceR(input = outputs_deface$FLAIR_crop, output = outputs_deface$FLAIR_fsldeface)
+
+
+# not working=?
+# defaceR_bias(input = inputs$T1w_crop, output = outputs_deface$T1w_fsldeface_bc)
+# defaceR_bias(input = inputs$FLAIR_crop, output = outputs_deface$FLAIR_fsldeface_bc)
+```
+
+
+```{r}
+source("fsl_anat.R")
+fsl_anat(input = outputs_deface$T1w_fsldeface,
+          output_folder = outputs_deface$T1w_anat)
+```
+
