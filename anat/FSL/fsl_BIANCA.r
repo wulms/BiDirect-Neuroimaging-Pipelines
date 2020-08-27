@@ -10,17 +10,21 @@ initialize_parallel <- function(not_use = 2) {
   return(cl)
 }
 
-bianca_r <- function(masterfile, output_name, cores_not_used = 2) {
+# BIANCA LOO function
+
+bianca_r <- function(masterfile, model_name, cores_not_used = 2) {
   initialize_parallel(not_use = cores_not_used)
-  path_to_folder(unique(output_name))
+  #path_to_folder(unique(output_name))
   
+  output_name <- read_delim(masterfile, delim = "\t", col_names = FALSE)[[1]] %>% as.list() %>% lapply(., str_replace, ".nii.gz", paste0("_mask_", model_name, ".nii.gz"))
   
   foreach (i = 1:length(output_name)) %dopar% {
     
-    if (file.exists(paste0(output_name[i], ".nii.gz")) == 0) {
+    
+    if (!file.exists(output_name[[i]])) {
       command <- paste0("bianca --singlefile=", masterfile, 
                         " --labelfeaturenum=4 --brainmaskfeaturenum=1 --querysubjectnum=", i,
-                        " --trainingnums=all --featuresubset=1,2 --matfeaturenum=3 --trainingpts=2000 --nonlespts=10000 --selectpts=noborder -o '", output_name[i],
+                        " --trainingnums=all --featuresubset=1,2 --matfeaturenum=3 --trainingpts=2000 --nonlespts=10000 --selectpts=noborder -o '", output_name[[i]],
                         "'"#, " --saveclassifierdata ", output_name[i] 
                         #" -v"
       )
@@ -32,11 +36,13 @@ bianca_r <- function(masterfile, output_name, cores_not_used = 2) {
 }
 
 
-train_bianca <- function(train_list, output_name, output_classifier) {
+# BIANCA training function
+
+train_bianca <- function(masterfile, output_name, output_classifier) {
   initialize_parallel()
   foreach (i = 1:length(output_classifier)) %dopar% {
-    query_subject <- read_table(train_list[i], col_names = FALSE) %>% nrow()
-    command <- paste0("bianca --singlefile=", train_list[i], 
+    query_subject <- read_table(masterfile[i], col_names = FALSE) %>% nrow()
+    command <- paste0("bianca --singlefile=", masterfile[i], 
                       " --labelfeaturenum=4 --brainmaskfeaturenum=1 --querysubjectnum=", query_subject,
                       " --trainingnums=all --featuresubset=1,2 --matfeaturenum=3 --trainingpts=2000 --nonlespts=10000 --selectpts=noborder -o '", output_name[i],
                       "' --saveclassifierdata ", output_classifier[i]
@@ -48,6 +54,8 @@ train_bianca <- function(train_list, output_name, output_classifier) {
     #cat("\014")
   }
 }
+
+# BIANCA test function
 
 test_bianca <- function(masterfile, output_name, input_classifier, cores_not_used = 2) {
   initialize_parallel(not_use = cores_not_used)
@@ -77,18 +85,22 @@ application_bianca_classifiers <- function(trained_models, test_sets, prefix){
     print(output_folder)
     # Reading in of file list for model application
     output_masks <- read.table(test_sets[i], sep = '\t', header = FALSE)[,1] %>% as.character() %>%
-      str_replace("/mnt/Vierer/BIDS/derivatives_temp/FSL/fsl_flirt_pipeline/", output_folder) %>% 
-      str_replace(".nii.gz", "_BIANCA_mask")
+      str_replace("/mnt/Vierer/BIDS/derivatives_temp/FSL/fsl_deface_pipeline/", output_folder) %>% 
+      str_replace("/mnt/Vierer/BIDS/derivatives_temp/FSL/fsl_deface_anat_pipeline/", output_folder) %>%
+      str_replace("/mnt/Vierer/BIDS/derivatives_temp/FSL/fsl_bianca_pipeline2/bet/", output_folder) %>%
+      str_replace(".nii.gz", "_BIANCA_mask.nii.gz")
     # print(length(output_masks))
     # print(head(output_masks))
     
-    cl <- initialize_parallel(not_use = 4)
+    cl <- initialize_parallel(not_use = 2)
     
     
     #for (j in 1:length(output_masks)){
     
     
     foreach(j = 1:length(output_masks)) %dopar% {
+    #foreach(j = 1:length(10)) %dopar% # for debug
+        
       path_to_folder(output_masks[j])
       cat("\014")
       
@@ -99,7 +111,7 @@ application_bianca_classifiers <- function(trained_models, test_sets, prefix){
                         #" -v"
       )
       # print(command)
-      if(file.exists(paste0(output_masks[j], ".nii.gz")) == 0) {
+      if(!file.exists(output_masks[j])) {
         system("clear")
         system(command)
       }
@@ -108,10 +120,10 @@ application_bianca_classifiers <- function(trained_models, test_sets, prefix){
   }
 }
 
-
+# BIANCA measures
 
 bianca_performance <- function(lesionmask, threshold, manualmask, saveoutput = 0, output_name){
-  initialize_parallel(2)
+  cl <- initialize_parallel(2)
   foreach (i = 1:length(lesionmask)) %dopar% {
     print(i)
     
@@ -125,27 +137,34 @@ bianca_performance <- function(lesionmask, threshold, manualmask, saveoutput = 0
       system(command)
     }
   }
+  stopCluster(cl)
 }
 
-bianca_cluster_info <- function(lesionmask, threshold, min_cluster_size = 0, output_name){
-  initialize_parallel(2)
+bianca_cluster_info <- function(lesionmask, threshold, min_cluster_size = 0){
+  cl <- initialize_parallel(2)
+  output_name <- str_replace(lesionmask, ".nii.gz", paste0("_", threshold, ".txt"))
   foreach (i = 1:length(lesionmask)) %dopar% {
     print(i) 
     
     if(file.exists(output_name[i]) == 0) {
       command <- paste0("bianca_cluster_stats ",
                         lesionmask[i], " ",
-                        threshold[i], " ",
+                        threshold, " ",
                         min_cluster_size, " > ", output_name[i])
       print(command)
       system(command)
       system("clear")
     }
-    #print(a)
-    #WMH_number = str_extract(a[1], "(?<= is )([:digit:]+\\.[:digit:]+|[:digit:]+)")
-    #esion_Volume = str_extract(a[2], "(?<= is )([:digit:]+\\.[:digit:]+|[:digit:]+)")
-    #print(WMH_number)
-    #print(Lesion_Volume)
-    #return(paste0(WMH_number, ", ", Lesion_Volume))
   }
+  stopCluster(cl)
+}
+
+volume_extractor <- function(input_file, type){
+  if(type == "wmh_number"){
+    volume <- readLines(input_file)[1] %>% str_extract("(?<= is )[:digit:]*(\\.[:digit:]*$|$)")
+  }
+  else if(type == "total_wmh_volume"){
+    volume <- readLines(input_file)[2] %>% str_extract("(?<= is )[:digit:]*(\\.[:digit:]*$|$)")    
+  }
+  return(volume)
 }

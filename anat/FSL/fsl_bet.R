@@ -1,10 +1,7 @@
 fsl_bet <- function(input, fval) {
   initialize_parallel()
   foreach (i = 1:length(input)) %dopar% {
-    output = str_replace(input[i], "T2", paste0("T2_", fval)) %>%
-      str_replace("//", "/") %>% 
-      str_replace("/fsl_anat_pipeline/", "/fsl_bet_pipeline/") %>%
-      str_replace("/anat.T2/", "_")
+    output = str_replace(input[i], ".nii", paste0("_bet_", fval, ".nii")) 
     
     path_to_folder(unique(output))
     
@@ -15,7 +12,7 @@ fsl_bet <- function(input, fval) {
     
     command <- command[!file.exists(output)]
     
-    lapply(command, print)
+    lapply(command, system)
     
   }
   

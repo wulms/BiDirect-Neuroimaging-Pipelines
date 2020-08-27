@@ -1,0 +1,93 @@
+---
+title: "fsl_BIANCA_LOO"
+author: "Niklas Wulms"
+date: "8/10/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+library(stringr)
+library(doParallel)
+library(foreach)
+library(tidyr)
+library(dplyr)
+library(logger)
+
+source("fsl_flirt.R")
+source("fsl_bet.R")
+source("fsl_BIANCA.r")
+source("../../functions/general.R")
+
+knitr::opts_chunk$set(echo = TRUE)
+
+working_dir <- "/mnt/Vierer/BIDS/derivatives_temp/FSL/"
+knitr::opts_knit$set(root.dir = working_dir)
+setwd(working_dir)
+```
+
+## LOO models
+
+```{r}
+bianca_r(masterfile = "/mnt/Vierer/BIDS/derivatives_temp/FSL/fsl_bianca_pipeline2/model_csv/bc_bet_121_train.txt",
+         model_name = "bc_bet_121")
+bianca_r(masterfile = "/mnt/Vierer/BIDS/derivatives_temp/FSL/fsl_bianca_pipeline2/model_csv/bc_bet_deface_121_train.txt",
+         model_name = "bc_bet_deface_121")
+bianca_r(masterfile = "/mnt/Vierer/BIDS/derivatives_temp/FSL/fsl_bianca_pipeline2/model_csv/bc_bet_clean_121_train.txt",
+         model_name = "bc_bet_clean_121")
+bianca_r(masterfile = "/mnt/Vierer/BIDS/derivatives_temp/FSL/fsl_bianca_pipeline2/model_csv/bc_bet_deface_clean_121_train.txt",
+         model_name = "bc_bet_deface_clean_121")
+```
+
+
+```{r}
+pipeline1 <- list.files("/mnt/Vierer/BIDS/derivatives_temp/FSL/fsl_bianca_pipeline2/bet/", "mask_bc_bet_121.nii", recursive = TRUE, full.names = TRUE)
+pipeline2 <- list.files("/mnt/Vierer/BIDS/derivatives_temp/FSL/fsl_bianca_pipeline2/bet/", "mask_bc_bet_deface_121.nii", recursive = TRUE, full.names = TRUE)
+pipeline3 <- list.files("/mnt/Vierer/BIDS/derivatives_temp/FSL/fsl_bianca_pipeline2/bet/", "mask_bc_bet_clean_121.nii", recursive = TRUE, full.names = TRUE)
+pipeline4 <- list.files("/mnt/Vierer/BIDS/derivatives_temp/FSL/fsl_bianca_pipeline2/bet/", "mask_bc_bet_deface_clean_121.nii", recursive = TRUE, full.names = TRUE)
+
+bianca_cluster_info(pipeline1, threshold = 0.7)
+bianca_cluster_info(pipeline2, threshold = 0.7)
+bianca_cluster_info(pipeline3, threshold = 0.7)
+bianca_cluster_info(pipeline4, threshold = 0.7)
+
+
+```
+
+```{r}
+bianca_txt_files <- list.files("/mnt/Vierer/BIDS/derivatives_temp/FSL/fsl_bianca_pipeline2/bet/", ".txt", recursive = TRUE, full.names = TRUE)
+
+models_loo <- tibble(subject = str_extract(bianca_txt_files,  "sub-[:digit:]{5}"),
+                 session = str_extract(bianca_txt_files, "ses-s[:digit:]{1}"),
+                 model = str_extract(bianca_txt_files, "mask_[:graph:]*$") %>% str_remove("_0.[:digit:]+.txt"),
+                 threshold = str_extract(bianca_txt_files, "mask_[:graph:]*$") %>% str_extract("0.[:digit:]+(?=.txt)"),
+                 wmh_number = lapply(bianca_txt_files, volume_extractor, "wmh_number") %>% unlist() %>% as.numeric(),
+                 wmh_volume = lapply(bianca_txt_files, volume_extractor, "total_wmh_volume") %>% unlist() %>% as.numeric())
+
+readr::write_csv(models_loo, path = "/home/niklas/Owncloud/wulms/BD_variablen/neuroimaging/bianca_models_loo.csv")
+```
+
+
+```{r}
+pipeline1txt <- list.files("/mnt/Vierer/BIDS/derivatives_temp/FSL/fsl_bianca_pipeline2/bet/", "mask_bc_bet_121_0.8.txt", recursive = TRUE, full.names = TRUE)
+pipeline2txt <- list.files("/mnt/Vierer/BIDS/derivatives_temp/FSL/fsl_bianca_pipeline2/bet/", "mask_bc_bet_deface_121_0.8.txt", recursive = TRUE, full.names = TRUE)
+pipeline3txt <- list.files("/mnt/Vierer/BIDS/derivatives_temp/FSL/fsl_bianca_pipeline2/bet/", "mask_bc_bet_clean_121_0.8.txt", recursive = TRUE, full.names = TRUE)
+pipeline4txt <- list.files("/mnt/Vierer/BIDS/derivatives_temp/FSL/fsl_bianca_pipeline2/bet/", "mask_bc_bet_deface_clean_121_0.8.txt", recursive = TRUE, full.names = TRUE)
+
+model121_loo <- tibble(subject = str_extract(pipeline1txt, "sub-[:digit:]{5}"),
+       session = str_extract(pipeline1txt, "ses-s[:digit:]{1}"),
+     #  loo_bc_b = lapply(pipeline1txt, volume_extractor, "wmh_number") %>% unlist() %>% as.numeric(),
+       loo_bc_bet_121 = lapply(pipeline1txt, volume_extractor, "total_wmh_volume") %>% unlist() %>% as.numeric(),
+     #  wmh_number2 = lapply(pipeline2txt, volume_extractor, "wmh_number") %>% unlist() %>% as.numeric(),
+       loo_bc_bet_deface_121 = lapply(pipeline2txt, volume_extractor, "total_wmh_volume") %>% unlist() %>% as.numeric(),
+     #  wmh_number3 = lapply(pipeline3txt, volume_extractor, "wmh_number") %>% unlist() %>% as.numeric(),
+       loo_bc_bet_clean_121 = lapply(pipeline3txt, volume_extractor, "total_wmh_volume") %>% unlist() %>% as.numeric(),
+     #  wmh_number4 = lapply(pipeline4txt, volume_extractor, "wmh_number") %>% unlist() %>% as.numeric(),
+       loo_bc_bet_deface_clean_121 = lapply(pipeline4txt, volume_extractor, "total_wmh_volume") %>% unlist() %>% as.numeric()
+)
+
+
+readr::write_csv(model121_loo, path = "/home/niklas/Owncloud/wulms/BD_variablen/neuroimaging/bianca_pipelines_loo.csv")
+```
+
+
+

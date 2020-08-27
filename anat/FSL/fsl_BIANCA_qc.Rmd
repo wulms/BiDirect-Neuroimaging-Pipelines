@@ -1,0 +1,213 @@
+---
+title: "bianca_qc"
+author: "Niklas Wulms"
+date: "8/11/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+library(stringr)
+library(doParallel)
+library(foreach)
+library(tidyr)
+library(dplyr)
+library(logger)
+
+source("fsl_flirt.R")
+source("fsl_bet.R")
+source("fsl_BIANCA.r")
+source("../../functions/general.R")
+
+knitr::opts_chunk$set(echo = TRUE)
+
+working_dir <- "/mnt/Vierer/BIDS/derivatives_temp/FSL/"
+knitr::opts_knit$set(root.dir = working_dir)
+setwd(working_dir)
+```
+
+```{r}
+file1 <- "/mnt/Vierer/BIDS/derivatives_temp/FSL/fsl_bianca_pipeline2/model_csv/bc_bet_121_train.txt"
+file2 <- "/mnt/Vierer/BIDS/derivatives_temp/FSL/fsl_bianca_pipeline2/model_csv/bc_bet_clean_121_train.txt"
+file3 <- "/mnt/Vierer/BIDS/derivatives_temp/FSL/fsl_bianca_pipeline2/model_csv/bc_bet_deface_121_train.txt"
+file4 <- "/mnt/Vierer/BIDS/derivatives_temp/FSL/fsl_bianca_pipeline2/model_csv/bc_bet_deface_clean_121_train.txt"
+```
+
+```{r}
+ids <- read_delim(file1, delim = "\t", col_names = FALSE) 
+
+
+
+ids_short <-ids %>%
+  mutate_all(str_remove, "/mnt/Vierer/BIDS/derivatives_temp/FSL/fsl_bianca_pipeline2/")
+
+
+for (i in 1:nrow(ids)){
+  #print(ids_short$X1[i])
+  #print(ids_short$X2[i])
+  #print(ids_short$X3[i])
+  #print(ids_short$X4[i])
+  
+  print(paste0(
+    "T2: ", ids_short$X1[i],
+    " T1: ", ids_short$X2[i],
+    " MT: ", ids_short$X3[i],
+    " Mask: ", ids_short$X4[i]
+  ))
+  cat("\n")
+}
+
+system("fsleyes")
+
+
+
+
+
+  
+```
+
+```{r}
+bianca_qc_pngs <- function(input_nii) {
+  
+  output_file = str_replace(input_nii, ".nii.gz", ".png") %>% 
+    str_replace("/bet|/masks", "/qc_pngs") %>%
+    str_remove("anat/") %>%
+    str_remove("sub-[:digit:]{5}_ses-S[:digit:]{1}") %>%
+    str_replace("/ses-(S|s)4/", "_ses-s4_")
+  path_to_folder(output_file)
+  command <- paste0("fsleyes render --scene lightbox --displaySpace ", 
+                    input_nii,
+                    " --sliceSpacing 5.0 --ncols 9 --nrows 3 -of ", 
+                    output_file,
+                    " --size 1920 800") 
+  initialize_parallel()
+
+  foreach (i = 1:length(command)) %dopar% {
+    if(!file.exists(output_file[i])){
+      system(command[i])
+    }
+  }
+}
+
+```
+
+
+```{r}
+bianca_set_qc <- function(input_txt){
+  ids <- read_delim(input_txt, delim = "\t", col_names = FALSE) 
+  
+  bianca_qc_pngs(ids$X1)
+  bianca_qc_pngs(ids$X2)
+  bianca_qc_pngs(ids$X4)
+  #file.exists(ids$X1) %>% print()
+  #file.exists(ids$X2) %>% print()
+  #file.exists(ids$X4) %>% print()
+}
+
+bianca_print_qc <- function(input_txt){
+  ids <- read_delim(input_txt, delim = "\t", col_names = FALSE) 
+  
+  ids_short <-ids %>%
+  mutate_all(str_remove, "/mnt/Vierer/BIDS/derivatives_temp/FSL/fsl_bianca_pipeline2/")
+  
+  print(ids_short)
+  #file.exists(ids$X1) %>% print()
+  #file.exists(ids$X2) %>% print()
+  #file.exists(ids$X4) %>% print()
+}
+
+bianca_print_qc(file1)
+bianca_print_qc(file2)
+bianca_print_qc(file3)
+bianca_print_qc(file4)
+
+bianca_set_qc(file1)
+bianca_set_qc(file2)
+bianca_set_qc(file3)
+bianca_set_qc(file4)
+
+
+
+```
+
+```{r}
+pipeline1 <- list.files("/mnt/Vierer/BIDS/derivatives_temp/FSL/fsl_bianca_pipeline2/bet/", "mask_bc_bet_121.nii", recursive = TRUE, full.names = TRUE)
+pipeline2 <- list.files("/mnt/Vierer/BIDS/derivatives_temp/FSL/fsl_bianca_pipeline2/bet/", "mask_bc_bet_deface_121.nii", recursive = TRUE, full.names = TRUE)
+pipeline3 <- list.files("/mnt/Vierer/BIDS/derivatives_temp/FSL/fsl_bianca_pipeline2/bet/", "mask_bc_bet_clean_121.nii", recursive = TRUE, full.names = TRUE)
+pipeline4 <- list.files("/mnt/Vierer/BIDS/derivatives_temp/FSL/fsl_bianca_pipeline2/bet/", "mask_bc_bet_deface_clean_121.nii", recursive = TRUE, full.names = TRUE)
+
+bianca_qc_pngs(pipeline1)
+bianca_qc_pngs(pipeline2)
+bianca_qc_pngs(pipeline3)
+bianca_qc_pngs(pipeline4)
+```
+
+# _clean sehen besser aus
+
+```{r}
+search = function(string_regex){
+  working_dir <- "/mnt/Vierer/BIDS/derivatives_temp/FSL/fsl_bianca_pipeline2/qc_pngs/"
+  list_of_files <- list.files(path = working_dir, pattern = string_regex, recursive= TRUE, full.names=TRUE)
+  return(list_of_files)
+}
+
+df_4_gif <- function(FLAIR_pattern, T1_pattern, mask_manual_pattern, mask_output_pattern){
+
+  df <- tibble(FLAIR = search(FLAIR_pattern),
+               T1 = search(T1_pattern),
+               mask_manual = search(mask_manual_pattern),
+               mask_output = search(mask_output_pattern))
+  return(df)
+}
+
+
+gif_creator <- function(df){
+  # convert -delay 100 -loop 0 *.jpeg animatedGIF.gif
+  
+  output <- str_replace(df$mask_output, ".png$", ".gif") %>% str_replace("qc_pngs", "qc_gifs")
+  path_to_folder(output)
+  
+  command <- paste("convert -delay 200 -loop 0 ", 
+        df$T1, df$FLAIR, df$mask_manual, df$mask_output, df$mask_manual, df$FLAIR, 
+        output, 
+        sep = " ")
+   
+  initialize_parallel()
+
+  foreach (i = 1:length(command)) %dopar% {
+    if(!file.exists(output[i])){
+      system(command[i])
+    }
+  }
+}
+```
+
+```{r}
+pipe1 <- df_4_gif(FLAIR_pattern = "T2_biascorr_bet_0.4.png",
+         T1_pattern = "T1_biascorr_bet_0.5_FLAIR_anat_space.png",
+         mask_manual_pattern = "__FLAIR_mask_T2_space.png",
+         mask_output_pattern = "bc_bet_121.png")
+
+pipe2 <- df_4_gif(FLAIR_pattern = "FLAIR_T1w_space_biascorr_bet_0.5_FLAIR_anat_space.png",
+         T1_pattern = "T1_biascorr_bet_0.5_FLAIR_anat_space.png",
+         mask_manual_pattern = "__FLAIR_mask_T2_space.png",
+         mask_output_pattern = "bc_bet_clean_121.png")
+
+pipe3 <- df_4_gif(FLAIR_pattern = "T2_biascorr_bet_0.4.png",
+         T1_pattern = "T1_deface_biascorr_bet_0.5_FLAIR_anat_deface_space.png",
+         mask_manual_pattern = "__FLAIR_mask_T2_space.png",
+         mask_output_pattern = "bc_bet_deface_121.png")
+
+pipe4 <- df_4_gif(FLAIR_pattern = "FLAIR_T1w_space_deface_biascorr_bet_0.5_FLAIR_anat_deface_space.png",
+         T1_pattern = "T1_deface_biascorr_bet_0.5_FLAIR_anat_deface_space.png",
+         mask_manual_pattern = "__FLAIR_mask_T2_space.png",
+         mask_output_pattern = "bc_bet_deface_clean_121.png")
+```
+
+```{r}
+gif_creator(pipe1)
+gif_creator(pipe2)
+gif_creator(pipe3)
+gif_creator(pipe4)
+
+```
+

@@ -21,6 +21,8 @@ bids_derivatives_temp_dir <- "/mnt/Vierer/BIDS/derivatives_temp/FSL/fsl_anat_pip
 
 
 source("fsl_defacer.R")
+source("fsl_bet.R")
+source("fsl_flirt.R")
 source("../../functions/general.R")
 source("../../bids/bids_functions.R")
 
@@ -85,5 +87,230 @@ defaceR(input = outputs_deface$FLAIR_crop, output = outputs_deface$FLAIR_fsldefa
 source("fsl_anat.R")
 fsl_anat(input = outputs_deface$T1w_fsldeface,
           output_folder = outputs_deface$T1w_anat)
+```
+
+```{r}
+T1w_anat = list.files("/mnt/Vierer/BIDS/derivatives_temp/FSL/fsl_deface_anat_pipeline/", "T1_biascorr.nii.gz", recursive = TRUE, full.names = TRUE)
+T1w = list.files("/mnt/Vierer/BIDS/derivatives_temp/FSL/fsl_deface_pipeline/", "T1w_fsldeface.nii.gz", recursive = TRUE, full.names = TRUE)
+
+T2w_anat = list.files("/mnt/Vierer/BIDS/derivatives_temp/FSL/fsl_anat_pipeline/", "T2_biascorr.nii.gz", recursive = TRUE, full.names = TRUE)
+T2w = list.files("/mnt/Vierer/BIDS/derivatives_temp/FSL/fsl_anat_pipeline/", "FLAIR.nii.gz", recursive = TRUE, full.names = TRUE)
+```
+
+```{r}
+fsl_bet(input = T1w_anat, fval = 0.5)
+fsl_bet(input = T1w, fval = 0.5)
+
+fsl_bet(input = T2w_anat, fval = 0.4)
+fsl_bet(input = T2w, fval = 0.4)
+```
+
+
+
+# FLIRT
+
+```{r}
+T1w_anat_BET = list.files("/mnt/Vierer/BIDS/derivatives_temp/FSL/fsl_deface_anat_pipeline/", "T1_biascorr_bet_0.5.nii.gz", recursive = TRUE, full.names = TRUE)
+T1w_BET = list.files("/mnt/Vierer/BIDS/derivatives_temp/FSL/fsl_deface_pipeline/", "T1w_fsldeface_bet_0.5.nii.gz", recursive = TRUE, full.names = TRUE)
+```
+
+
+```{r}
+T2w_BET <- str_replace(T1w_BET, "_deface_", "_anat_") %>% str_replace("T1w_fsldeface_bet_0.5", "FLAIR_bet_0.4")
+
+T2w_BET_1 <- T2w_BET[file.exists(T2w_BET)]
+
+T1w_BET_1 <- T1w_BET[file.exists(T2w_BET)]
+T1w_BET_2 <- T1w_BET[file.exists(T2w_anat_BET)]
+
+T2w_anat_BET <- str_replace(T1w_anat_BET, "_deface_anat_", "_anat_") %>% str_replace("T1w.anat", "FLAIR.anat") %>% str_replace("T1_biascorr_bet_0.5", "T2_biascorr_bet_0.4")
+
+T2w_anat_BET_1 <- T2w_anat_BET[file.exists(T2w_anat_BET)]
+
+T1w_anat_BET_1 <- T1w_anat_BET[file.exists(T2w_anat_BET)]
+T1w_anat_BET_2 <- T1w_anat_BET[file.exists(T2w_BET)]
+```
+
+# 6degrees of freedom
+ 
+ 
+```{r}
+# T2w anat image - 4314 
+fsl_flirt(input_volume = T2w_anat_BET_1,
+          input_reference = T1w_anat_BET_1, 
+          prefix = "T1_space_anat", 
+          dof = 6)
+
+fsl_flirt(input_volume = T2w_anat_BET_1,
+          input_reference = T1w_BET_2, 
+          prefix = "T1_space", 
+          dof = 6)
+
+cbind(tail(T2w_anat_BET_1), tail(T1w_anat_BET_1))
+cbind(tail(T2w_anat_BET_1), tail(T1w_anat_BET_1))
+
+```
+
+```{r}
+# T2w_BET - 4320
+fsl_flirt(input_volume = T2w_BET_1,
+          input_reference = T1w_anat_BET_2, 
+          prefix = "T1_space_anat", 
+          dof = 6)
+
+
+
+fsl_flirt(input_volume = T2w_BET_1,
+          input_reference = T1w_BET_1, 
+          prefix = "T1_space", 
+          dof = 6)
+
+rbind(tail(T2w_anat_BET_1), tail(T1w_anat_BET_1))
+rbind(tail(T2w_anat_BET_1), tail(T1w_BET_1))
+
+```
+
+
+# Invert matrices
+
+```{r}
+mat_files <- list.files("/mnt/Vierer/BIDS/derivatives_temp/FSL/fsl_anat_pipeline/", "_6.mat", recursive = TRUE, full.names = TRUE)
+
+fsl_convert_xfm(mat_files)
+```
+
+# Convert T2->T1 and T1->MNI matrix to T2->MNI matrix
+
+```{r}
+# T1 to MNI152 MAT
+mat_files_T1_to_MNI <- list.files("/mnt/Vierer/BIDS/derivatives_temp/FSL/fsl_anat_pipeline/", "T1_to_MNI_lin.mat", recursive = TRUE, full.names = TRUE)
+
+mat_files_T1_to_MNI_4314 <- mat_files_T1_to_MNI[file.exists(T2w_anat_BET)] # 4314
+mat_files_T1_to_MNI_4320 <- mat_files_T1_to_MNI[file.exists(T2w_BET)] # 4320
+
+# T2 to T1 MAT
+
+# 4320
+mat_files_T2w_T1w <- list.files("/mnt/Vierer/BIDS/derivatives_temp/FSL/fsl_anat_pipeline/", "FLAIR_bet_0.4_T1_space_6.mat", recursive = TRUE, full.names = TRUE)
+mat_files_T2w_T1w_anat <- list.files("/mnt/Vierer/BIDS/derivatives_temp/FSL/fsl_anat_pipeline/", "FLAIR_bet_0.4_T1_space_anat_6.mat", recursive = TRUE, full.names = TRUE)
+
+# 4314
+mat_files_T2w_bc_T1w <- list.files("/mnt/Vierer/BIDS/derivatives_temp/FSL/fsl_anat_pipeline/", "biascorr_bet_0.4_T1_space_6.mat", recursive = TRUE, full.names = TRUE)
+mat_files_T2w_bc_T1w_anat <- list.files("/mnt/Vierer/BIDS/derivatives_temp/FSL/fsl_anat_pipeline/", "biascorr_bet_0.4_T1_space_anat_6.mat", recursive = TRUE, full.names = TRUE)
+
+# addition of masks
+
+## 4320
+fsl_convert_xfm_add_masks(input_mat1 = mat_files_T2w_T1w,
+                          input_mat2 = mat_files_T1_to_MNI_4320)
+fsl_convert_xfm_add_masks(input_mat1 = mat_files_T2w_T1w_anat,
+                          input_mat2 = mat_files_T1_to_MNI_4320)
+
+rbind(tail(mat_files_T2w_T1w), tail(mat_files_T1_to_MNI_4320))
+rbind(tail(mat_files_T2w_T1w_anat), tail(mat_files_T1_to_MNI_4320))
+
+## 4314 
+fsl_convert_xfm_add_masks(input_mat1 = mat_files_T2w_bc_T1w,
+                          input_mat2 = mat_files_T1_to_MNI_4314)
+fsl_convert_xfm_add_masks(input_mat1 = mat_files_T2w_bc_T1w_anat,
+                          input_mat2 = mat_files_T1_to_MNI_4314)
+
+rbind(tail(mat_files_T2w_bc_T1w), tail(mat_files_T1_to_MNI_4314))
+rbind(tail(mat_files_T2w_bc_T1w_anat), tail(mat_files_T1_to_MNI_4314))
+```
+
+# FLIRT T1 to T2 space
+
+```{r}
+# T1 to T2 MAT
+mat_files_T2w_bc_T1w_inverse <- list.files("/mnt/Vierer/BIDS/derivatives_temp/FSL/fsl_anat_pipeline/", "biascorr_bet_0.4_T1_space_6_inverse.mat", 
+                                           recursive = TRUE, full.names = TRUE) # 4314
+mat_files_T2w_bc_T1w_anat_inverse <- list.files("/mnt/Vierer/BIDS/derivatives_temp/FSL/fsl_anat_pipeline/", "biascorr_bet_0.4_T1_space_anat_6_inverse.mat", 
+                                                recursive = TRUE, full.names = TRUE) # 4314
+
+mat_files_T2w_T1w_inverse <- list.files("/mnt/Vierer/BIDS/derivatives_temp/FSL/fsl_anat_pipeline/", "FLAIR_bet_0.4_T1_space_6_inverse.mat", 
+                                        recursive = TRUE, full.names = TRUE) # 4320
+mat_files_T2w_T1w_anat_inverse <- list.files("/mnt/Vierer/BIDS/derivatives_temp/FSL/fsl_anat_pipeline/", "FLAIR_bet_0.4_T1_space_anat_6_inverse.mat", 
+                                             recursive = TRUE, full.names = TRUE) # 4320
+
+
+
+
+
+# 4314
+fsl_flirt_to_space(input_nii = T1w_anat_BET_1,
+                   input_ref = T2w_anat_BET_1,
+                   input_mat = mat_files_T2w_bc_T1w_anat_inverse,
+                   prefix = "_FLAIR_anat_space")
+
+fsl_flirt_to_space(input_nii = T1w_BET_2,
+                   input_ref = T2w_anat_BET_1,
+                   input_mat = mat_files_T2w_bc_T1w_inverse,
+                   prefix = "_FLAIR_anat_space")
+
+rbind(tail(T1w_anat_BET_1), tail(T2w_anat_BET_1), tail(mat_files_T2w_bc_T1w_anat_inverse))
+rbind(tail(T1w_BET_2), tail(T2w_anat_BET_1), tail(mat_files_T2w_bc_T1w_inverse))
+
+
+# 4320
+fsl_flirt_to_space(input_nii = T1w_anat_BET_2,
+                   input_ref = T2w_BET_1,
+                   input_mat = mat_files_T2w_T1w_anat_inverse,
+                   prefix = "_FLAIR_space")
+
+fsl_flirt_to_space(input_nii = T1w_BET_1,
+                   input_ref = T2w_BET_1,
+                   input_mat = mat_files_T2w_T1w_inverse,
+                   prefix = "_FLAIR_space")
+
+rbind(tail(T1w_anat_BET_2), tail(T2w_BET_1), tail(mat_files_T2w_T1w_anat_inverse))
+rbind(tail(T1w_BET_1), tail(T2w_BET_1), tail(mat_files_T2w_T1w_inverse))
+
+```
+
+# Mask T2 images with T1 image (that is in T2-space)
+
+
+```{r}
+T1w_T2w_bc_T1w_inverse_27 <- list.files("/mnt/Vierer/BIDS/derivatives_temp/FSL/fsl_deface_anat_pipeline/", 
+                                        "T1_biascorr_bet_0.5_FLAIR_space.nii.gz", #27
+                                           recursive = TRUE, full.names = TRUE) # 4314
+T1w_files_T2w_bc_T1w_anat_inverse_26 <- list.files("/mnt/Vierer/BIDS/derivatives_temp/FSL/fsl_deface_anat_pipeline/",
+                                                   "T1_biascorr_bet_0.5_FLAIR_anat_space.nii.gz", #26
+                                                recursive = TRUE, full.names = TRUE) # 4314
+
+T1w_files_T2w_T1w_inverse_27 <- list.files("/mnt/Vierer/BIDS/derivatives_temp/FSL/fsl_deface_pipeline/", 
+                                           "T1w_fsldeface_bet_0.5_FLAIR_space.nii", # 27
+                                        recursive = TRUE, full.names = TRUE) # 4320
+
+T1w_files_T2w_T1w_anat_inverse_26 <- list.files("/mnt/Vierer/BIDS/derivatives_temp/FSL/fsl_deface_pipeline/", 
+                                                "T1w_fsldeface_bet_0.5_FLAIR_anat_space.nii", #26
+                                             recursive = TRUE, full.names = TRUE) # 4320
+
+T2w_4314_26 <- T2w_anat[file.exists(T2w_anat_BET)]
+T2w_4320_27 <- T2w[file.exists(T2w_BET)]
+```
+
+
+
+```{r}
+# 26 slices
+fslmaths_mask(input_nii = T2w_4314_26, input_mask = T1w_files_T2w_T1w_anat_inverse_26)
+fslmaths_mask(input_nii = T2w_4314_26, input_mask = T1w_files_T2w_bc_T1w_anat_inverse_26)
+
+rbind(tail(T2w_4314_26), tail(T1w_files_T2w_T1w_anat_inverse_26))
+length(T1w_files_T2w_T1w_anat_inverse_26)
+rbind(tail(T2w_4314_26), tail(T1w_files_T2w_bc_T1w_anat_inverse_26))
+length(T1w_files_T2w_bc_T1w_anat_inverse_26)
+
+# 27 slices
+fslmaths_mask(input_nii = T2w_4320_27, input_mask = T1w_files_T2w_T1w_inverse_27)
+fslmaths_mask(input_nii = T2w_4320_27, input_mask = T1w_T2w_bc_T1w_inverse_27)
+
+rbind(tail(T2w_4320_27), tail(T1w_files_T2w_T1w_inverse_27))
+length(T1w_files_T2w_T1w_inverse_27)
+rbind(tail(T2w_4320_27), tail(T1w_T2w_bc_T1w_inverse_27))
+length(T1w_T2w_bc_T1w_inverse_27)
+
 ```
 

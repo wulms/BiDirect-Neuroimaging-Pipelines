@@ -1,0 +1,33 @@
+---
+title: "bianca_fsleyes_qc"
+author: "Niklas Wulms"
+date: "8/10/2020"
+output: html_document
+---
+
+```{r}
+
+```
+
+```{r}
+bianca_r(masterfile = "/mnt/Vierer/BIDS/derivatives_temp/FSL/fsl_bianca_pipeline2/model_csv/bc_bet_121_train.txt",
+         model_name = "bc_bet_121")
+bianca_r(masterfile = "/mnt/Vierer/BIDS/derivatives_temp/FSL/fsl_bianca_pipeline2/model_csv/bc_bet_deface_121_train.txt",
+         model_name = "bc_bet_deface_121")
+bianca_r(masterfile = "/mnt/Vierer/BIDS/derivatives_temp/FSL/fsl_bianca_pipeline2/model_csv/bc_bet_clean_121_train.txt",
+         model_name = "bc_bet_clean_121")
+bianca_r(masterfile = "/mnt/Vierer/BIDS/derivatives_temp/FSL/fsl_bianca_pipeline2/model_csv/bc_bet_deface_clean_121_train.txt",
+         model_name = "bc_bet_deface_clean_121")
+```
+
+```{r}
+model1 <- "/mnt/Vierer/BIDS/derivatives_temp/FSL/fsl_bianca_pipeline2/model_csv/bc_bet_121_train.txt"
+model2 <- "/mnt/Vierer/BIDS/derivatives_temp/FSL/fsl_bianca_pipeline2/model_csv/bc_bet_clean_121_train.txt"
+model3 <- "/mnt/Vierer/BIDS/derivatives_temp/FSL/fsl_bianca_pipeline2/model_csv/bc_bet_deface_121_train.txt"
+model4 <- "/mnt/Vierer/BIDS/derivatives_temp/FSL/fsl_bianca_pipeline2/model_csv/bc_bet_deface_clean_121_train.txt"
+```
+
+```{r}
+read_delim(model1, delim = "\t", col_names = FALSE)
+```
+

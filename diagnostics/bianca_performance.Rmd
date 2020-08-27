@@ -1,0 +1,120 @@
+---
+title: "bianca_performance"
+author: "Niklas Wulms"
+date: "8/5/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+```
+
+# file import
+
+```{r}
+df_121 <- readr::read_csv("/home/niklas/Owncloud/wulms/BD_variablen/WML121/wml_df_clean_dwi.csv") %>%
+  select(Patientennummer, Survey, raw_no_mask) %>%
+  rename(subject = Patientennummer,
+         session = Survey,
+         manual_volume_old = raw_no_mask) %>%
+  mutate(subject = paste0("sub-", subject),
+         session = str_replace(session, "Follow_Up_2", "ses-s4") %>% str_replace("Baseline", "ses-s0"))
+
+df_160 <- readr::read_csv("/home/niklas/Owncloud/wulms/BD_variablen/WML121/wml_df_clean_long_80_dwi.csv") %>%
+  select(Patientennummer, Survey, raw_no_mask) %>%
+  rename(subject = Patientennummer,
+         session = Survey,
+         manual_volume_old = raw_no_mask) %>%
+  mutate(subject = paste0("sub-", subject),
+         session = str_replace(session, "Follow_Up_2", "ses-s4") %>% str_replace("Baseline", "ses-s0"))
+
+df_together <- full_join(df_121, df_160)
+
+```
+
+
+```{r}
+bianca_manual <- readr::read_csv("/home/niklas/Owncloud/wulms/BD_variablen/neuroimaging/manual_masks.csv") %>%
+  rename(manual_volume_new = wmh_volume1,
+         manual_number = wmh_number1) %>%
+  mutate(manual_volume_new = manual_volume_new/1000)
+```
+
+
+# Pipeline_plots
+
+```{r fig.width = 15, fig.height = 30}
+bianca_pipelines <- readr::read_csv("/home/niklas/Owncloud/wulms/BD_variablen/neuroimaging/bianca_model_s4_121_pipelines.csv") %>%
+  mutate(volume = wmh_volume/1000)
+
+bianca_manual %>%
+  left_join(bianca_pipelines) %>%
+  ggplot(aes(x = manual_volume_new, y = volume)) +
+  geom_point() +
+  geom_smooth(method = "loess", level = 0.99, fill ="green") +
+  geom_abline(slope = 1, intercept = 0) +
+  facet_grid(model ~ threshold + session) +
+  theme_linedraw()
+
+
+```
+
+```{r fig.width = 15, fig.height=15}
+library(RColorBrewer)
+source("https://gist.githubusercontent.com/benmarwick/2a1bb0133ff568cbe28d/raw/fb53bd97121f7f9ce947837ef1a4c65a73bffb3f/geom_flat_violin.R")
+bianca_manual %>%
+  left_join(bianca_pipelines) %>%
+  mutate(volume_diff = volume - manual_volume_new) %>%
+  ggplot(aes(x = model, y = volume_diff, fill = session)) +
+  geom_jitter(width = .15, size = .3, alpha = 0.2) +
+  geom_vline(xintercept = 0, alpha = 0.4) + 
+  geom_flat_violin(position = position_nudge(x = .2, y = 0), trim = TRUE, alpha = .5, adjust = .8, scale = "width") +
+  geom_boxplot(width = .2, outlier.shape = NA, alpha = 0.7) +
+  facet_wrap(. ~ threshold) +
+  coord_flip() +
+  geom_hline(yintercept = 0)
+```
+
+
+
+# LOO Plot
+
+```{r fig.height = 10, fig.width = 5}
+bianca_loo <- readr::read_csv("/home/niklas/Owncloud/wulms/BD_variablen/neuroimaging/bianca_models_loo.csv") %>%
+  mutate(volume = wmh_volume/1000)
+
+bianca_manual %>%
+  left_join(bianca_loo) %>%
+  filter(session == "ses-s4") %>%
+  ggplot(aes(x = manual_volume_new, y = volume)) +
+  geom_point() +
+  geom_smooth(method = "lm") +
+  geom_abline(slope = 1, intercept = 0) +
+  facet_grid(model ~ session + threshold)
+```
+
+```{r}
+library(RColorBrewer)
+source("https://gist.githubusercontent.com/benmarwick/2a1bb0133ff568cbe28d/raw/fb53bd97121f7f9ce947837ef1a4c65a73bffb3f/geom_flat_violin.R")
+bianca_manual %>%
+  left_join(bianca_loo) %>%
+  filter(!is.na(threshold)) %>%
+  mutate(volume_diff = volume - manual_volume_new) %>%
+  ggplot(aes(x = model, y = volume_diff, fill = session)) +
+  geom_jitter(width = .15, size = .3, alpha = 0.2) +
+  geom_vline(xintercept = 0, alpha = 0.4) + 
+  geom_flat_violin(position = position_nudge(x = .2, y = 0), trim = TRUE, alpha = .5, adjust = .8, scale = "width") +
+  geom_boxplot(width = .2, outlier.shape = NA, alpha = 0.7) +
+  facet_wrap(. ~ threshold) +
+  coord_flip() +
+  geom_hline(yintercept = 0)
+```
+
+```{r}
+bianca_pipelines %>%
+  group_by(threshold, model) %>%
+  summarise(n = n())
+```
+
+

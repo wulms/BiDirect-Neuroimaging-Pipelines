@@ -19,7 +19,10 @@ file_copy <- function(input, output){
   for (i in seq_along(input)) {
     cat("\014")
     log_debug(paste(i, "of", length(input), " processed."))
-    file.copy(input[i], output[i], overwrite = FALSE)
+    if(!file.exists(output[i])){
+      path_to_folder(output[i])
+      file.copy(input[i], output[i], overwrite = FALSE)
+    }
   }
 }
 
