@@ -1,0 +1,335 @@
+---
+title: "Freesurfer Extractor"
+author: "Niklas Wulms"
+date: "9/2/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(tidyverse)
+
+working_dir = "/media/niklas/Drive/sub_30005_freesurver"
+```
+
+```{r}
+freesurfer <- tibble(files = list.files(working_dir, "stats", recursive = TRUE, full.names = TRUE),
+                     subject = str_extract(files, "sub-[:digit:]{5}"),
+                     session = str_extract(files, "ses-s[:digit:]{1}"),
+                     type = str_extract(files, "(?<=stats/)[:graph:]+$")) %>% 
+  filter(str_detect(files, "/stats/")) %>%
+  mutate(txt = purrr::map(files, readr::read_lines),
+         length = purrr::map(txt, length)) %>%
+  arrange(type)
+
+freesurfer_split <- freesurfer  %>%
+  group_split(type)
+
+                           
+freesurfer_keys <- freesurfer %>% group_keys(type)
+
+freesurfer_wide <- freesurfer %>% select(-length, -files) %>% pivot_wider(names_from = type, values_from = txt)
+
+
+```
+
+
+# Global: aseg, brainvol, wmparc
+
+- brainvol is fully implemented in aseg.stats!
+
+```{r}
+###
+freesurfer_global <- freesurfer %>% 
+  filter(str_detect(type, "aseg|wmparc")) %>%
+  mutate(hemisphere = "global")
+
+freesurfer_global_tables <- freesurfer_global %>%
+  mutate(table_measure = lapply(freesurfer_global$txt, str_subset, "Measure"),
+         table_roi = lapply(freesurfer_global$txt, str_subset, "ColHeaders|^( |  )[:digit:]{1}"))
+```
+
+
+# Hemisphere: all with rh or lh
+
+
+```{r}
+###
+freesurfer_hemi <- freesurfer %>% 
+  filter(str_detect(type, "^(l|r)h.")) %>%
+  filter(str_detect(type, "pct|curv", negate = TRUE)) %>%
+  mutate(hemisphere = str_extract(type, "^(l|r)") %>% str_replace("l", "left") %>% str_replace("r", "right"))
+
+freesurfer_hemi_tables <- freesurfer_hemi %>%
+  mutate(table_measure = lapply(freesurfer_hemi$txt, str_subset, "Measure"),
+         table_roi = lapply(freesurfer_hemi$txt, str_subset, "ColHeaders|^(| )[:alpha:]{1}"))
+```
+
+## irrelevant until now
+
+- w-g.ct.stats
+- curv.stats
+
+```{r}
+### pct table
+freesurfer_hemi_pct <- freesurfer %>% 
+  filter(str_detect(type, "pct"))
+
+freesurfer_hemi_pct_tables <- freesurfer_hemi_pct %>%
+  mutate(hemisphere = str_extract(type, "^(l|r)") %>% str_replace("l", "left") %>% str_replace("r", "right"),
+         table_measure = lapply(freesurfer_hemi_pct$txt, str_subset, "Measure"),
+         table_roi = lapply(freesurfer_hemi_pct$txt, str_subset, "ColHeaders|^( |  )[:digit:]{1}"))
+
+### curvature table ???
+freesurfer_hemi_curv <- freesurfer %>% 
+  filter(str_detect(type, "curv"))
+```
+
+
+
+# Preparation of tables in wide format
+
+```{r}
+freesurfer_global_wide <- freesurfer_global_tables %>%
+  select(-files, -length, -txt) %>% 
+  pivot_wider(names_from = type, values_from = c(table_measure, table_roi)) %>%
+  select(-table_roi_brainvol.stats)
+
+freesurfer_hemi_wide <- full_join(freesurfer_hemi_tables, freesurfer_hemi_pct_tables) %>%
+  mutate(type = str_remove(type, "(l|r)h")) %>%
+  select(-files, -length, -txt) %>% 
+  pivot_wider(names_from = type, values_from = c(table_measure, table_roi), names_sep = "") %>%
+  select(-table_measure.curv.stats, -'table_measure.w-g.pct.stats')
+
+```
+
+```{r}
+df <- freesurfer_global_tables
+
+i = 1
+
+table_measure_column <- df$table_measure
+    filename <- df$files
+    type <- df$type
+    subject <- df$subject
+    session <- df$session
+    hemisphere <- df$hemisphere
+  
+ for (i in 1:length(table_measure_column)) {
+    
+    output_filename <- str_replace(filename[i], ".stats$", ".stats_measure.csv")
+    
+    subject_table_long <- table_measure_column[[i]] %>%
+      str_remove("# Measure |, mm^3") %>%
+      data.frame(
+        input = .,
+        type = type[i],
+        session = session[i],
+        subject = subject[i],
+        hemisphere = hemisphere[i]
+      ) %>%
+      separate(
+        input,
+        into = c("variable", "value"),
+        sep = regex(", (?=[:digit:]{1})")
+      ) %>%
+      separate(value,
+               into = c("value_in_mm3", "unit"),
+               sep = ", ") %>%
+      mutate(
+        value_in_mm3 = as.numeric(value_in_mm3),
+        variable = paste0(variable, " (", unit, ")")
+      ) %>%
+      select(subject, session, type, hemisphere, everything()) %>%
+      select(-unit)
+    
+    subject_table_wide <- subject_table_long %>%
+      pivot_wider(
+        names_from = variable,
+        values_from = value_in_mm3,
+        names_prefix = paste0(stats_id, "_")
+      )
+    readr::write_csv(subject_table_wide, path = output_filename, col_names = TRUE)
+ }
+```
+
+## measure extraction
+
+
+```{r}
+extract_table_measures <- function(df){
+  
+    table_measure_column <- df$table_measure
+    filename <- df$files
+    type <- df$type
+    subject <- df$subject
+    session <- df$session
+    hemisphere <- df$hemisphere
+  
+  for (i in 1:length(table_measure_column)) {
+    
+    output_filename <- str_replace(filename[i], ".stats$", ".stats_measure.csv")
+    
+    print(paste(type[i], subject[i], session[i], hemisphere[i], output_filename))
+    
+    subject_table_long <- table_measure_column[[i]] %>%
+      str_remove("# Measure |, mm^3") %>%
+      data.frame(
+        input = .,
+        type = type[i],
+        session = session[i],
+        subject = subject[i],
+        hemisphere = hemisphere[i]
+      ) %>%
+      separate(
+        input,
+        into = c("variable", "value"),
+        sep = regex(", (?=[:digit:]{1})")
+      ) %>%
+      separate(value,
+               into = c("value_in_mm3", "unit"),
+               sep = ", ") %>%
+      mutate(
+        value_in_mm3 = as.numeric(value_in_mm3),
+        variable = paste0(variable, " (", unit, ")")
+      ) %>%
+      select(subject, session, type, hemisphere, everything()) %>%
+      select(-unit)
+    
+    subject_table_wide <- subject_table_long %>%
+      pivot_wider(
+        names_from = variable,
+        values_from = value_in_mm3,
+        names_prefix = paste0(type[i], "_")
+      )
+    readr::write_csv(subject_table_wide, path = output_filename, col_names = TRUE)
+  }
+}
+
+
+
+
+# writes csv files of measure
+extract_table_measures(freesurfer_global_tables)
+extract_table_measures(freesurfer_hemi_tables)
+
+```
+
+
+
+
+```{r}
+df <- freesurfer_hemi_tables
+
+
+extract_table_roi <- function(df, extract_type){
+  
+    table_roi_column <- df$table_roi
+    filename <- df$files
+    type <- df$type
+    subject <- df$subject
+    session <- df$session
+    hemisphere <- df$hemisphere
+  
+  for (i in 1:length(table_roi_column)) {
+    
+    output_filename <- str_replace(filename[i], ".stats$", ".stats_roi.csv")
+    
+    print(paste(type[i], subject[i], session[i], hemisphere[i], output_filename))
+    
+   table_df <- table_roi_column[[i]] %>%
+     str_remove("# ColHeaders ") %>% as.character()
+    # Extract column names
+    header_id <- str_squish(table_df[[1]]) %>% str_split(pattern = " ") %>% unlist()
+
+    
+    if (extract_type == "global") {
+      
+    subject_table_long <- table_df %>%
+      data.frame(input = str_squish(.),
+                 type = type[i], 
+                 subject = subject[i],
+                 session = session[i],
+                 hemisphere = hemisphere[i]) %>%
+      mutate(input = as.character(input)) %>%
+      separate(input, into = header_id, sep = " ") %>%
+      filter(str_detect(., "Index", negate = TRUE)) %>%
+      select(-.) %>%
+      select(subject, session, type, hemisphere, everything())
+    
+    subject_table_wide <- subject_table_long %>%
+      pivot_wider(names_from = StructName,
+                  values_from = c(Index, SegId, NVoxels, Volume_mm3, normMean, normStdDev, normMin, normMax, normRange), 
+                  names_glue = paste0(type[i],"_{StructName}_{.value}"))
+    
+    } else if (extract_type == "thickness") {
+      
+      subject_table_long <- table_df %>%
+      data.frame(input = str_squish(.),
+                 type = type[i], 
+                 subject = subject[i],
+                 session = session[i],
+                 hemisphere = hemisphere[i]) %>%
+      mutate(input = as.character(input)) %>%
+      separate(input, into = header_id, sep = " ") %>%
+      filter(str_detect(., "StructName", negate = TRUE)) %>%
+      select(-.) %>%
+      select(subject, session, type, hemisphere, everything())
+    
+    subject_table_wide <- subject_table_long %>%
+      pivot_wider(names_from = StructName,
+                  values_from = c(NumVert, SurfArea, GrayVol, ThickAvg, ThickStd, MeanCurv, GausCurv, FoldInd, CurvInd), 
+                  names_glue = paste0(type[i],"_{StructName}_{.value}"))
+    }
+    
+    readr::write_csv(subject_table_wide, path = output_filename, col_names = TRUE)
+    
+  }
+    
+}
+
+
+# writes csv files of measure
+extract_table_roi(freesurfer_global_tables, extract_type = "global")
+extract_table_roi(freesurfer_hemi_tables, extract_type = "thickness")
+```
+
+
+# find all csv files
+
+```{r}
+metainfo_csv <- tibble(csv_name = list.files(working_dir, pattern = ".csv", recursive = TRUE, full.names = TRUE),
+       type = str_extract(csv_name, "stats_(measure|roi)"),
+       sub = str_extract(csv_name, "sub-[:digit:]{5}"),
+       session = str_extract(csv_name, "ses-s[:digit:]{1}"),
+       table = str_extract(csv_name, "(?<=stats/)[:graph:]+$")) 
+
+
+unique_tables <- unique(metainfo_csv$table)
+
+
+for(i in 1:length(unique_tables)){
+  print(i)
+}
+
+
+read_csv(metainfo_csv$csv_name[1])
+
+
+
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
