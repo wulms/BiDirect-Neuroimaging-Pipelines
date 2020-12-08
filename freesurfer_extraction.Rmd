@@ -10,11 +10,15 @@ knitr::opts_chunk$set(echo = TRUE)
 
 library(tidyverse)
 
-working_dir = "/media/niklas/Drive/sub_30005_freesurver"
+source("freesurfer_extraction_functions.R")
+
+working_dir = "/home/niklas/Owncloud/wulms/BD_variablen/neuroimaging/anat/freesurfer_stats_files/"
+
+output_data = "/home/niklas/Owncloud/wulms/BD_variablen/neuroimaging/anat/freesurfer_stats_merged/"
 ```
 
 ```{r}
-freesurfer <- tibble(files = list.files(working_dir, "stats", recursive = TRUE, full.names = TRUE),
+freesurfer <- tibble(files = list.files(working_dir, "stats$", recursive = TRUE, full.names = TRUE),
                      subject = str_extract(files, "sub-[:digit:]{5}"),
                      session = str_extract(files, "ses-s[:digit:]{1}"),
                      type = str_extract(files, "(?<=stats/)[:graph:]+$")) %>% 
@@ -87,210 +91,19 @@ freesurfer_hemi_curv <- freesurfer %>%
 ```
 
 
-
-# Preparation of tables in wide format
-
-```{r}
-freesurfer_global_wide <- freesurfer_global_tables %>%
-  select(-files, -length, -txt) %>% 
-  pivot_wider(names_from = type, values_from = c(table_measure, table_roi)) %>%
-  select(-table_roi_brainvol.stats)
-
-freesurfer_hemi_wide <- full_join(freesurfer_hemi_tables, freesurfer_hemi_pct_tables) %>%
-  mutate(type = str_remove(type, "(l|r)h")) %>%
-  select(-files, -length, -txt) %>% 
-  pivot_wider(names_from = type, values_from = c(table_measure, table_roi), names_sep = "") %>%
-  select(-table_measure.curv.stats, -'table_measure.w-g.pct.stats')
-
-```
-
-```{r}
-df <- freesurfer_global_tables
-
-i = 1
-
-table_measure_column <- df$table_measure
-    filename <- df$files
-    type <- df$type
-    subject <- df$subject
-    session <- df$session
-    hemisphere <- df$hemisphere
-  
- for (i in 1:length(table_measure_column)) {
-    
-    output_filename <- str_replace(filename[i], ".stats$", ".stats_measure.csv")
-    
-    subject_table_long <- table_measure_column[[i]] %>%
-      str_remove("# Measure |, mm^3") %>%
-      data.frame(
-        input = .,
-        type = type[i],
-        session = session[i],
-        subject = subject[i],
-        hemisphere = hemisphere[i]
-      ) %>%
-      separate(
-        input,
-        into = c("variable", "value"),
-        sep = regex(", (?=[:digit:]{1})")
-      ) %>%
-      separate(value,
-               into = c("value_in_mm3", "unit"),
-               sep = ", ") %>%
-      mutate(
-        value_in_mm3 = as.numeric(value_in_mm3),
-        variable = paste0(variable, " (", unit, ")")
-      ) %>%
-      select(subject, session, type, hemisphere, everything()) %>%
-      select(-unit)
-    
-    subject_table_wide <- subject_table_long %>%
-      pivot_wider(
-        names_from = variable,
-        values_from = value_in_mm3,
-        names_prefix = paste0(stats_id, "_")
-      )
-    readr::write_csv(subject_table_wide, path = output_filename, col_names = TRUE)
- }
-```
-
 ## measure extraction
 
 
 ```{r}
-extract_table_measures <- function(df){
-  
-    table_measure_column <- df$table_measure
-    filename <- df$files
-    type <- df$type
-    subject <- df$subject
-    session <- df$session
-    hemisphere <- df$hemisphere
-  
-  for (i in 1:length(table_measure_column)) {
-    
-    output_filename <- str_replace(filename[i], ".stats$", ".stats_measure.csv")
-    
-    print(paste(type[i], subject[i], session[i], hemisphere[i], output_filename))
-    
-    subject_table_long <- table_measure_column[[i]] %>%
-      str_remove("# Measure |, mm^3") %>%
-      data.frame(
-        input = .,
-        type = type[i],
-        session = session[i],
-        subject = subject[i],
-        hemisphere = hemisphere[i]
-      ) %>%
-      separate(
-        input,
-        into = c("variable", "value"),
-        sep = regex(", (?=[:digit:]{1})")
-      ) %>%
-      separate(value,
-               into = c("value_in_mm3", "unit"),
-               sep = ", ") %>%
-      mutate(
-        value_in_mm3 = as.numeric(value_in_mm3),
-        variable = paste0(variable, " (", unit, ")")
-      ) %>%
-      select(subject, session, type, hemisphere, everything()) %>%
-      select(-unit)
-    
-    subject_table_wide <- subject_table_long %>%
-      pivot_wider(
-        names_from = variable,
-        values_from = value_in_mm3,
-        names_prefix = paste0(type[i], "_")
-      )
-    readr::write_csv(subject_table_wide, path = output_filename, col_names = TRUE)
-  }
-}
-
-
-
-
 # writes csv files of measure
 extract_table_measures(freesurfer_global_tables)
 extract_table_measures(freesurfer_hemi_tables)
-
 ```
 
 
 
-
 ```{r}
-df <- freesurfer_hemi_tables
-
-
-extract_table_roi <- function(df, extract_type){
-  
-    table_roi_column <- df$table_roi
-    filename <- df$files
-    type <- df$type
-    subject <- df$subject
-    session <- df$session
-    hemisphere <- df$hemisphere
-  
-  for (i in 1:length(table_roi_column)) {
-    
-    output_filename <- str_replace(filename[i], ".stats$", ".stats_roi.csv")
-    
-    print(paste(type[i], subject[i], session[i], hemisphere[i], output_filename))
-    
-   table_df <- table_roi_column[[i]] %>%
-     str_remove("# ColHeaders ") %>% as.character()
-    # Extract column names
-    header_id <- str_squish(table_df[[1]]) %>% str_split(pattern = " ") %>% unlist()
-
-    
-    if (extract_type == "global") {
-      
-    subject_table_long <- table_df %>%
-      data.frame(input = str_squish(.),
-                 type = type[i], 
-                 subject = subject[i],
-                 session = session[i],
-                 hemisphere = hemisphere[i]) %>%
-      mutate(input = as.character(input)) %>%
-      separate(input, into = header_id, sep = " ") %>%
-      filter(str_detect(., "Index", negate = TRUE)) %>%
-      select(-.) %>%
-      select(subject, session, type, hemisphere, everything())
-    
-    subject_table_wide <- subject_table_long %>%
-      pivot_wider(names_from = StructName,
-                  values_from = c(Index, SegId, NVoxels, Volume_mm3, normMean, normStdDev, normMin, normMax, normRange), 
-                  names_glue = paste0(type[i],"_{StructName}_{.value}"))
-    
-    } else if (extract_type == "thickness") {
-      
-      subject_table_long <- table_df %>%
-      data.frame(input = str_squish(.),
-                 type = type[i], 
-                 subject = subject[i],
-                 session = session[i],
-                 hemisphere = hemisphere[i]) %>%
-      mutate(input = as.character(input)) %>%
-      separate(input, into = header_id, sep = " ") %>%
-      filter(str_detect(., "StructName", negate = TRUE)) %>%
-      select(-.) %>%
-      select(subject, session, type, hemisphere, everything())
-    
-    subject_table_wide <- subject_table_long %>%
-      pivot_wider(names_from = StructName,
-                  values_from = c(NumVert, SurfArea, GrayVol, ThickAvg, ThickStd, MeanCurv, GausCurv, FoldInd, CurvInd), 
-                  names_glue = paste0(type[i],"_{StructName}_{.value}"))
-    }
-    
-    readr::write_csv(subject_table_wide, path = output_filename, col_names = TRUE)
-    
-  }
-    
-}
-
-
-# writes csv files of measure
+# writes csv files of ROI
 extract_table_roi(freesurfer_global_tables, extract_type = "global")
 extract_table_roi(freesurfer_hemi_tables, extract_type = "thickness")
 ```
@@ -306,25 +119,191 @@ metainfo_csv <- tibble(csv_name = list.files(working_dir, pattern = ".csv", recu
        table = str_extract(csv_name, "(?<=stats/)[:graph:]+$")) 
 
 
-unique_tables <- unique(metainfo_csv$table)
+merge_table_information(metainfo_csv)
+```
 
 
-for(i in 1:length(unique_tables)){
-  print(i)
-}
+
+```{r}
+csv_measure_files_to_merge <- list.files(output_data, pattern = "measure.csv", recursive = FALSE, full.names = TRUE)
+csv_roi_files_to_merge <- list.files(output_data, pattern = "roi.csv", recursive = FALSE, full.names = TRUE)
 
 
-read_csv(metainfo_csv$csv_name[1])
+merged_measure_df <- merge_csv_files(csv_measure_files_to_merge)
+merged_roi_df <- merge_csv_files(csv_roi_files_to_merge)
+```
 
+
+```{r}
+new_names <- colnames(merged_measure_df) %>% 
+  str_replace(".(?=stats)", "_-") %>%
+  str_replace("\\(", "in ") %>% 
+  str_replace("[:space:]", "_-_") %>% 
+  str_replace("[:space:]", "_-_") %>% 
+  str_replace_all("[[:punct:]]", "_") %>% 
+  str_replace_all("__", "_") %>% 
+  str_remove_all("\\^|_$")
+
+str_split(new_names, "__", n = 4, simplify = TRUE)
+
+colnames(merged_measure_df) <- new_names
+
+##################
+new_names <- colnames(merged_roi_df) %>% 
+#  str_replace("\\(", "in ") %>% 
+  str_replace_all("-", "") %>%
+  str_replace("_(?=[:alnum:]*$)", "_-_") %>% 
+#  str_replace("[:space:]", "_-_") %>% 
+#  str_replace("[:space:]", "_-_") %>% 
+  str_replace_all("stats_", "stats_-_") %>%
+  str_replace_all("\\.", "_") %>% 
+  str_replace_all("_-_", "__") %>%
+  str_replace("Volume__mm3", "_Volume_mm3")
+
+str_split(new_names, "__", n = 3, simplify = TRUE)
+
+colnames(merged_roi_df) <- new_names
+
+####################
+write_csv(merged_measure_df, path = paste0(output_data, "freesurfer_merged/freesurfer_measures.csv"))
+write_csv(merged_roi_df, path = paste0(output_data, "freesurfer_merged/freesurfer_roi.csv"))
+```
+
+
+```{r}
+library(dataMaid)
+makeDataReport(merged_measure_df, replace = TRUE)
+makeDataReport(merged_roi_df, replace = TRUE)
+```
+
+
+
+```{r}
+measure_df_long <- merged_measure_df %>% 
+  pivot_longer(cols = contains("stats")) %>%
+  separate(name, sep = "__", into = c("file", "region", "metric")) %>%
+  separate(file, sep = "_stats_", into = c("file", "ROI")) %>% 
+  mutate(hemisphere = str_extract(ROI, "lh|rh") %>% str_replace("lh", "Left") %>% str_replace("rh", "Right"),
+         hemisphere2 = str_extract(file, "lh|rh") %>% str_replace("lh", "Left") %>% str_replace("rh", "Right"),
+         hemisphere3 = paste0(hemisphere, hemisphere2) %>% str_remove_all("NA"),
+         file_clean = str_remove(file, "(lh|rh)_"),
+         roi_clean = str_remove(ROI, "lh|rh"),
+         region = str_remove(region, "lh|rh")) %>%
+  select(-hemisphere, -hemisphere2, -file, -ROI) %>%
+  rename(hemisphere = hemisphere3)
+
+roi_df_long <- merged_roi_df %>% 
+  pivot_longer(cols = contains("stats")) %>%
+  separate(name, sep = "__", into = c("file", "region", "metric")) %>%
+  mutate(file = str_remove(file, "_stats"),
+         hemisphere = str_extract(region, "Left|Right|(lh|rh)(?!inal)") %>% str_replace("lh", "Left") %>% str_replace("rh", "Right"),
+         hemisphere2 = str_extract(file, "lh|rh") %>% str_replace("lh", "Left") %>% str_replace("rh", "Right"),
+         hemisphere3 = paste0(hemisphere, hemisphere2) %>% str_remove_all("NA"),
+         region_clean = str_remove(region, "Left|Right|wmlh|wmrh"),
+         file_clean = str_remove(file, "(lh|rh)_")) %>%
+  select(-hemisphere, -hemisphere2, -file, - region)
 
 
 ```
 
 
+```{r}
+library(rpivotTable)
+
+test <- measure_df_long %>%
+  filter(subject == "sub-30001") %>%
+  filter(session == "ses-s0")
+
+
+rpivotTable(test,
+            cols = c("file_clean", "hemisphere"),
+            rows = c("region", "metric", "session", "value"))
 
 
 
+test1 <- roi_df_long %>%
+  filter(subject == "sub-30001") %>%
+  filter(session == "ses-s0") %>%
+  filter(str_detect(file_clean, "aseg|wmparc", negate = TRUE))
 
+test2 <- roi_df_long %>%
+  filter(subject == "sub-30001") %>%
+  filter(session == "ses-s0") %>%
+  filter(str_detect(file_clean, "aseg|wmparc"))
+
+
+
+## variable
+
+rpivotTable(test2,
+            cols = c("file_clean"),
+            rows = c("metric", "region_clean", "session", "hemisphere3", "value"))
+```
+
+```{r}
+library(rpivotTable)
+library(htmlwidgets)
+    
+# savedPivot <- "iris.html"
+# rpivotTable(iris)   
+# saveWidget(rpivotTable(iris), savedPivot, savedPivot)
+# saveWidget(rpivotTable(iris),file.path(normalizePath(dirname(savedPivot)),basename(savedPivot)))
+
+
+##
+savedPivot <- "freesurfer_wholebrain.html"
+rpivotTable(test,
+            cols = c("file_clean", "hemisphere"),
+            rows = c("region", "metric"))   
+saveWidget(rpivotTable(test,
+            cols = c("file_clean", "hemisphere"),
+            rows = c("region", "metric")),
+           file.path(normalizePath(dirname(savedPivot)),
+                     basename(savedPivot)))
+##
+savedPivot <- "freesurfer_aseg_wmparc.html"
+rpivotTable(test1,
+            cols = c("metric", "hemisphere3"),
+            rows = c("region_clean", "file_clean"))   
+saveWidget(rpivotTable(test1,
+            cols = c("metric", "hemisphere3"),
+            rows = c("region_clean", "file_clean")),file.path(normalizePath(dirname(savedPivot)),basename(savedPivot)))
+##
+savedPivot <- "freesurfer_roi.html"
+rpivotTable(test2,
+            cols = c("metric", "hemisphere3"),
+            rows = c("region_clean", "file_clean"))   
+saveWidget(rpivotTable(test2,
+            cols = c("metric", "hemisphere3"),
+            rows = c("region_clean", "file_clean")),file.path(normalizePath(dirname(savedPivot)),basename(savedPivot)))
+```
+
+
+```{r}
+rpivotTable(measure_df_long,
+            cols = c("file_clean", "hemisphere"),
+            rows = c("region", "metric"))
+
+rpivotTable(roi_df_long,
+            cols = c("metric", "hemisphere3"),
+            rows = c("region_clean", "file_clean"))
+
+rpivotTable(roi_df_long)
+```
+
+
+# remove duplicate rows
+```{r}
+library(digest)
+merged_measure_df_duplicates_removed <- merged_measure_df[!duplicated(lapply(merged_measure_df, digest))]
+merged_roi_df_duplicates_removed <- merged_roi_df[!duplicated(lapply(merged_roi_df, digest))]
+```
+
+```{r}
+setdiff(names(merged_measure_df), names(merged_measure_df_duplicates_removed))
+setdiff(names(merged_roi_df), names(merged_roi_df_duplicates_removed))
+
+```
 
 
 
