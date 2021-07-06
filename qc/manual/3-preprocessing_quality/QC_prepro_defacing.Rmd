@@ -1,0 +1,102 @@
+---
+title: "Preprocessing_QC"
+author: "Niklas Wulms"
+date: "10/16/2019"
+output: html_document
+---
+```{r setup, include=FALSE}
+library(stringr)
+library(doParallel)
+library(foreach)
+
+
+source("../2-image_quality/qc_fsleyes.R")
+source("../tools/path_to_folder.R")
+
+knitr::opts_chunk$set(echo = TRUE)
+
+working_dir <- "/media/niklas/spaceC/WML121_BIDS"
+
+knitr::opts_knit$set(root.dir = working_dir)
+
+setwd(working_dir)
+```
+
+# Parallel setup
+
+```{r}
+
+# Calculate the number of cores
+no_cores <- detectCores() - 1
+
+# Initiate cluster
+cl <- makeCluster(no_cores, type="FORK", outfile = "")
+
+registerDoParallel(cl)
+getDoParWorkers()
+```
+
+# input images
+
+```{r}
+input_nii <- data.frame(
+  # raw input and first preprocs
+  T1 = list.files(working_dir, "T1w.nii.gz", recursive = T, full.names = F),
+  T1_reorient2std = list.files(working_dir, "T1w_reorient2std.nii.gz", recursive = T, full.names = F),
+  T1_cropped = list.files(working_dir, "T1w_cropped.nii.gz", recursive = T, full.names = F),
+  # defacing
+  T1_defaced_mri = list.files(working_dir, "T1w_defaced_mri_deface.nii.gz", recursive = T, full.names = F),
+  T1_defaced_pydeface = list.files(working_dir, "T1w_defaced_pydeface.nii.gz", recursive = T, full.names = F),
+  
+  T1_reorient2std_defaced_mri = list.files(working_dir, "T1w_reorient2std_defaced_mri_deface.nii.gz", recursive = T, full.names = F),
+  T1_reorient2std_defaced_pydeface = list.files(working_dir, "T1w_reorient2std_defaced_pydeface.nii.gz", recursive = T, full.names = F),
+  
+  T1_cropped_defaced_mri = list.files(working_dir, "T1w_cropped_defaced_mri_deface.nii.gz", recursive = T, full.names = F),
+  T1_cropped_defaced_pydeface = list.files(working_dir, "T1w_cropped_defaced_pydeface.nii.gz", recursive = T, full.names = F),
+  
+  # FLAIR
+  FLAIR = list.files(working_dir, "FLAIR.nii.gz", recursive = T, full.names = F),
+  FLAIR_mask = list.files(working_dir, "FLAIR_mask.nii.gz", recursive = T, full.names = F),
+  stringsAsFactors = F
+)
+
+head(input_nii)
+str(input_nii)
+```
+
+```{r}
+output_png <- data.frame(
+  T1_pydeface = str_replace(input_nii$T1_defaced_pydeface, "derivatives/FSL/2-Anonymize/sub-[:digit:]{5}/ses-S[:digit:]{1}/anat", "qualitycontrol/defacing/pydeface") %>% 
+    str_replace(".nii.gz", "_comp_defacing_pydeface.jpg"),
+  T1_mri_deface = str_replace(input_nii$T1_defaced_mri, "derivatives/FSL/2-Anonymize/sub-[:digit:]{5}/ses-S[:digit:]{1}/anat", "qualitycontrol/defacing/mri_deface") %>% 
+    str_replace(".nii.gz", "_comp_defacing_mri_deface.jpg"),
+  T1_pydeface_cropped = str_replace(input_nii$T1_defaced_pydeface, "derivatives/FSL/2-Anonymize/sub-[:digit:]{5}/ses-S[:digit:]{1}/anat", "qualitycontrol/defacing/pydeface") %>% 
+    str_replace(".nii.gz", "_comp_defacing_pydeface_cropped.jpg"),
+  T1_mri_deface_cropped = str_replace(input_nii$T1_defaced_mri, "derivatives/FSL/2-Anonymize/sub-[:digit:]{5}/ses-S[:digit:]{1}/anat", "qualitycontrol/defacing/mri_deface") %>% 
+    str_replace(".nii.gz", "_comp_defacing_mri_deface_cropped.jpg"),
+  T1_pydeface_reorient2std = str_replace(input_nii$T1_defaced_pydeface, "derivatives/FSL/2-Anonymize/sub-[:digit:]{5}/ses-S[:digit:]{1}/anat", "qualitycontrol/defacing/pydeface") %>% 
+    str_replace(".nii.gz", "_comp_defacing_pydeface_reorient2std.jpg"),
+  T1_mri_deface_reorient2std = str_replace(input_nii$T1_defaced_mri, "derivatives/FSL/2-Anonymize/sub-[:digit:]{5}/ses-S[:digit:]{1}/anat", "qualitycontrol/defacing/mri_deface") %>% 
+    str_replace(".nii.gz", "_comp_defacing_mri_deface_reorient2std.jpg"),
+  stringsAsFactors = FALSE
+)
+
+dir.create("qualitycontrol/defacing/mri_deface", recursive = TRUE)
+dir.create("qualitycontrol/defacing/pydeface", recursive = TRUE)
+
+```
+
+# Create FSLeyes images for each subject to look for best performing data, when using Pydeface or MRI_deface
+- based on input data
+```{r}
+qc_fsleyes_defacing(input_nii$T1_reorient2std_defaced_pydeface, input_nii$T1_defaced_pydeface, input_nii$T1_cropped_defaced_pydeface, 
+                    output_t1 = output_png$T1_pydeface,
+                    slice_spacing = 6.5)
+
+qc_fsleyes_defacing(input_nii$T1_reorient2std_defaced_mri, input_nii$T1_defaced_mri, input_nii$T1_cropped_defaced_mri, 
+                    output_t1 = output_png$T1_mri_deface,
+                    slice_spacing = 6.5)
+```
+
+# Choose the best data of Pydeface and MRI_deface and compare both with other
+- based on algorithms

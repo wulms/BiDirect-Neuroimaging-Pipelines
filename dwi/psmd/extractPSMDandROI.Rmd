@@ -1,0 +1,58 @@
+---
+title: "extract_ROI_information_FA_MD"
+author: "Niklas Wulms"
+date: "10/21/2019"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+library(stringr)
+library(tictoc)
+library(doParallel)
+library(foreach)
+
+source("../tools/path_to_folder.R")
+
+
+knitr::opts_chunk$set(echo = TRUE)
+
+working_dir <- "/media/niklas/spaceC/WML121_BIDS_2/"
+knitr::opts_knit$set(root.dir = working_dir)
+
+setwd(working_dir)
+```
+
+# Set up parallel computing
+
+```{r}
+
+# Calculate the number of cores
+no_cores <- detectCores() - 1
+
+# Initiate cluster
+cl <- makeCluster(no_cores, type="FORK", outfile = "")
+
+registerDoParallel(cl)
+getDoParWorkers()
+```
+
+
+# Find the existing FA / MD images, skeletonized too
+
+```{r}
+input_nii <- data.frame(FA_native = list.files(working_dir, "temp-DTI_FA_FA.nii.gz", recursive = TRUE, full.names = TRUE),
+                        MD_native = list.files(working_dir, "MD/temp-DTI_FA.nii.gz", recursive = TRUE, full.names = TRUE),
+                        PSMD_txt = list.files(working_dir, "psmd.txt", recursive = TRUE, full.names = TRUE),
+                        FA_MNI152 = list.files(working_dir, "all_FA.nii.gz", recursive = TRUE, full.names = TRUE),
+                        MD_MNI152 = list.files(working_dir, "all_MD.nii.gz", recursive = TRUE, full.names = TRUE),
+                        FA_skeleton = list.files(working_dir, "all_FA.nii.gz", recursive = TRUE, full.names = TRUE),
+                        MD_skeleton = list.files(working_dir, "MD.nii.gz", recursive = TRUE, full.names = TRUE),
+
+                        stringsAsFactors = F)
+
+input_nii$subject_path <- sub("[/][^/]+$", "", input_nii$dwi) %>% str_replace("dwi", "dwi/")
+input_nii$dwi <- str_replace(input_nii$dwi, input_nii$subject_path, "")
+input_nii$dwi_bvals <- str_replace(input_nii$dwi_bvals, input_nii$subject_path, "")
+input_nii$dwi_bvecs <- str_replace(input_nii$dwi_bvecs, input_nii$subject_path, "")
+
+```

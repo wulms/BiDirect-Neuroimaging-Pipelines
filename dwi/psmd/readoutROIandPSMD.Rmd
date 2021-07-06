@@ -1,0 +1,112 @@
+---
+title: "extract_ROI_information_FA_MD"
+author: "Niklas Wulms"
+date: "10/21/2019"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+library(stringr)
+library(doParallel)
+library(foreach)
+library(tidyr)
+library(ggplot2)
+library(forcats)
+
+source("../tools/path_to_folder.R")
+
+
+knitr::opts_chunk$set(echo = TRUE)
+
+working_dir <- "/media/niklas/spaceC/WML121_BIDS_2/"
+knitr::opts_knit$set(root.dir = working_dir)
+
+setwd(working_dir)
+```
+
+# Set up parallel computing
+
+```{r}
+
+# Calculate the number of cores
+no_cores <- detectCores() - 1
+
+# Initiate cluster
+cl <- makeCluster(no_cores, type="FORK", outfile = "")
+
+registerDoParallel(cl)
+getDoParWorkers()
+```
+
+
+# Find the existing PSMD / ROI txt files
+
+
+```{r}
+roi_txt <- list.files(path = working_dir,
+           pattern = ".txt", recursive = TRUE) %>% data.frame(files = ., stringsAsFactors = FALSE) %>%
+  filter(str_detect(files, "ROI|psmd.txt") == 1)
+
+roi <- roi_txt %>%
+  separate(files, into = c("base", "subject", "session", "type", "ROI", "file"), sep = "/", fill = "left") %>%
+  cbind(roi_txt) %>%
+  filter(str_detect(files, "ROI") == 1) %>%
+  mutate(atlas = str_extract(file, "MNI152"),
+         mask = str_extract(file, "(FA_mean|skeleton|wm)_(mask_(25|50|75|100)|mask)"),
+         region = str_extract(file, "Frontal|Parietal|Temporal|Occipital"),
+         value = unlist(lapply(roi$files, scan, what = numeric(), quiet = TRUE))) %>%
+  select(files, everything())
+```
+
+# PSMD readout
+```{r}
+read_psmd <- function(input_txt) {
+    PSMD_value <- read.delim(input_txt, stringsAsFactors = FALSE) %>% as.character(.) %>% str_extract("[:digit:]{1}.[:digit:]+")
+    return(PSMD_value)
+    }
+
+psmd_txt <- roi_txt %>% 
+  filter(str_detect(files, "psmd.txt") == 1) %>%
+  mutate(subject = str_extract(files, "sub-[:digit:]{5}"),
+         session = str_extract(files, "ses-[:digit:]{1}"),
+         psmd = as.numeric(unlist(lapply(files, read_psmd))))
+
+ 
+```
+
+# For saving - format in wide format
+
+```{r}
+wide_values <- roi %>%
+  select(subject, session, atlas, mask, region, value) %>%
+  mutate(mask_region = paste0(mask, "_", region)) %>%
+  select(-mask, -region) %>%
+  spread(mask_region, value) %>%
+  left_join(psmd_txt) %>%
+  mutate(idbidirect = str_extract(subject, "[:digit:]{5}"),
+         session_bd = str_replace(session, "ses-1", "s0"),
+         session_bd = str_replace(session_bd, "ses-3", "s4")) %>%
+  select(idbidirect, session_bd, everything()) %>%
+  select(-subject, -session, -files)
+
+write.table(wide_values, file = "dwi_ROI_PSMD.txt", row.names = FALSE)
+
+
+```
+
+```{r}
+roi$mask <- fct_relevel(as.factor(roi$mask), c("FA_mean_mask", "wm_mask_25", "wm_mask_50", "wm_mask_75", "wm_mask_100", "skeleton_mask"))
+
+roi %>%
+  select(subject, session, atlas, mask, region, value) %>%
+  ggplot(aes(x = session, y = value)) +
+  geom_boxplot() +
+  facet_grid(region ~ mask)
+```
+
+```{r}
+wide_values %>%
+  ggplot(aes(x = session_bd, y = psmd)) +
+  geom_boxplot()
+```
+

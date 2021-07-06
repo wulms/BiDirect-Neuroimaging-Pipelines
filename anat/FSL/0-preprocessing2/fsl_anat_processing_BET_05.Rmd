@@ -1,0 +1,132 @@
+---
+title: "FSL_anat_pipeline"
+author: "Niklas Wulms"
+date: "10/16/2019"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+library(stringr)
+library(tictoc)
+library(dplyr)
+library(doParallel)
+library(foreach)
+
+source("../tools/path_to_folder.R")
+source("./anonymize/defaceR.R")
+source("fsl_anat_BET_05.R")
+
+knitr::opts_chunk$set(echo = TRUE)
+
+working_dir <- "/media/niklas/spaceC/WML121_BIDS"
+knitr::opts_knit$set(root.dir = working_dir)
+
+setwd(working_dir)
+```
+
+# Set up parallel computing
+
+```{r}
+
+# Calculate the number of cores
+no_cores <- detectCores() - 1
+
+# Initiate cluster
+cl <- makeCluster(no_cores, type="FORK", outfile = "")
+
+registerDoParallel(cl)
+getDoParWorkers()
+```
+
+
+
+```{r}
+input_nii <- data.frame(T1 = list.files(working_dir, "T1w.nii.gz", recursive = TRUE, full.names = FALSE), 
+                        T1_cropped = list.files(working_dir, "T1w_cropped.nii.gz", recursive = TRUE, full.names = FALSE),
+                        T1_reorient2std = list.files(working_dir, "T1w_reorient2std.nii.gz", recursive = TRUE, full.names = FALSE),
+                        stringsAsFactors = FALSE) 
+
+input_nii <- input_nii %>%
+  mutate(
+  # T1 native
+  T1_defaced_fsl = str_replace(input_nii$T1, "T1w.nii", "T1w_defaced_fsl.nii")  %>%
+  str_replace("sourcedata", "derivatives/FSL/2-Anonymize"),
+  
+  T1_defaced_pydeface = str_replace(input_nii$T1, "T1w.nii", "T1w_defaced_pydeface.nii") %>%
+  str_replace("sourcedata", "derivatives/FSL/2-Anonymize"),
+  
+  T1_defaced_mri_deface = str_replace(input_nii$T1, "T1w.nii", "T1w_defaced_mri_deface.nii") %>%
+  str_replace("sourcedata", "derivatives/FSL/2-Anonymize"),
+  # T1_cropped
+  T1_cropped_defaced_fsl = str_replace(input_nii$T1_cropped, "T1w_cropped.nii", "T1w_cropped_defaced_fsl.nii") %>%
+  str_replace("1-ReorientAndCrop", "2-Anonymize"),
+  
+  T1_cropped_defaced_pydeface = str_replace(input_nii$T1_cropped, "T1w_cropped.nii", "T1w_cropped_defaced_pydeface.nii") %>%
+  str_replace("1-ReorientAndCrop", "2-Anonymize"),
+  
+  T1_cropped_defaced_mri_deface = str_replace(input_nii$T1_cropped, "T1w_cropped.nii", "T1w_cropped_defaced_mri_deface.nii") %>%
+  str_replace("1-ReorientAndCrop", "2-Anonymize"),
+  # T1_r2std
+  T1_r2std_defaced_fsl = str_replace(input_nii$T1_reorient2std, "T1w_reorient2std.nii", "T1w_reorient2std_defaced_fsl.nii") %>%
+  str_replace("1-ReorientAndCrop", "2-Anonymize"),
+    
+  T1_r2std_defaced_pydeface = str_replace(input_nii$T1_reorient2std, "T1w_reorient2std.nii", "T1w_reorient2std_defaced_pydeface.nii") %>%
+  str_replace("1-ReorientAndCrop", "2-Anonymize"), 
+  
+  T1_r2std_defaced_mri_deface = str_replace(input_nii$T1_reorient2std, "T1w_reorient2std.nii", "T1w_reorient2std_defaced_mri_deface.nii") %>%
+  str_replace("1-ReorientAndCrop", "2-Anonymize")
+)
+```
+
+
+```{r}
+
+#input[1] = input_nii$T1_defaced_fsl[1]
+
+folderpath <- function(input, output_folder) {
+  paths_folder <- sub("[/][^/]+$", "", input) %>%
+    str_replace("sourcedata|derivatives/FSL/(2-Anonymize|1-ReorientAndCrop)", "derivatives/FSL/3-FSL_pipeline/anat") %>%
+    str_replace("anat", output_folder)
+  return(paths_folder)
+}
+
+a = folderpath(input_nii$T1_defaced_fsl[1], "anat_t1_crop")
+
+
+output_nii <- data.frame(
+  T1 = folderpath(input_nii$T1, "anat_T1_BET_05"),
+  T1_cropped = folderpath(input_nii$T1_cropped, "anat_T1_crop_BET_05"),
+  T1_reorient2std = folderpath(input_nii$T1_reorient2std, "anat_T1_reorient2std_BET_05"),
+  T1_defaced_pydeface = folderpath(input_nii$T1_defaced_pydeface, "anat_T1_defaced_pydeface_BET_05"),
+  T1_defaced_mri_deface = folderpath(input_nii$T1_defaced_mri_deface, "anat_T1_defaced_mri_deface_BET_05"),
+  T1_cropped_defaced_pydeface = folderpath(input_nii$T1_cropped_defaced_pydeface, "anat_T1_cropped_defaced_pydeface_BET_05"),
+  T1_cropped_defaced_mri_deface = folderpath(input_nii$T1_cropped_defaced_mri_deface, "anat_T1_cropped_defaced_mri_deface_BET_05"),
+  T1_r2std_defaced_pydeface = folderpath(input_nii$T1_r2std_defaced_pydeface, "anat_T1_r2std_defaced_pydeface_BET_05"),
+  T1_r2std_defaced_mri_deface = folderpath(input_nii$T1_r2std_defaced_mri_deface, "anat_T1_r2std_defaced_mri_deface_BET_05"),
+  stringsAsFactors = FALSE)
+
+path_to_folder(output_nii$T1)
+path_to_folder(output_nii$T1_cropped)
+path_to_folder(output_nii$T1_reorient2std)
+path_to_folder(output_nii$T1_defaced_pydeface)
+path_to_folder(output_nii$T1_defaced_mri_deface)
+path_to_folder(output_nii$T1_cropped_defaced_pydeface)
+path_to_folder(output_nii$T1_cropped_defaced_mri_deface)
+path_to_folder(output_nii$T1_r2std_defaced_pydeface)
+path_to_folder(output_nii$T1_r2std_defaced_mri_deface)
+```
+
+```{r}
+
+
+fsl_anat(input_nii$T1 ,output_nii$T1)
+fsl_anat(input_nii$T1_cropped ,output_nii$T1_cropped)
+fsl_anat(input_nii$T1_reorient2std ,output_nii$T1_reorient2std)
+fsl_anat(input_nii$T1_defaced_pydeface ,output_nii$T1_defaced_pydeface)
+fsl_anat(input_nii$T1_defaced_mri_deface ,output_nii$T1_defaced_mri_deface)
+fsl_anat(input_nii$T1_cropped_defaced_pydeface ,output_nii$T1_cropped_defaced_pydeface)
+fsl_anat(input_nii$T1_cropped_defaced_mri_deface ,output_nii$T1_cropped_defaced_mri_deface)
+fsl_anat(input_nii$T1_r2std_defaced_pydeface ,output_nii$T1_r2std_defaced_pydeface)
+fsl_anat(input_nii$T1_r2std_defaced_mri_deface ,output_nii$T1_r2std_defaced_mri_deface)
+```
+

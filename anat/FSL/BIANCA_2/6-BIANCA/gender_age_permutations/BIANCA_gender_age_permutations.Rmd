@@ -1,0 +1,251 @@
+---
+title: "BIANCA_gender_age_models"
+author: "Niklas Wulms"
+date: "1/6/2020"
+output: html_document
+---
+
+
+```{r setup, include=FALSE}
+library(stringr)
+library(doParallel)
+library(foreach)
+library(tidyr)
+library(dplyr)
+
+# source("/anat/fsl/fsl_BIANCA.R")
+source("/home/niklas/Coding/bidirect-neuroimaging-processing/tools/path_to_folder.R")
+source("/home/niklas/Coding/bidirect-neuroimaging-processing/anat/fsl/fsl_BIANCA.R")
+
+knitr::opts_chunk$set(echo = TRUE)
+
+working_dir <- "/mnt/458e8a35-865f-4f0e-ab7e-8b4ac8684363/WML121_BIDS/derivatives/FSL"
+knitr::opts_knit$set(root.dir = working_dir)
+```
+
+
+
+
+
+
+## Models based on properties (age, gender)
+
+```{r}
+subject_data_s4 <- read.table("/home/niklas/Dropbox/White_Matter_Project/WML_Paper_Code/wml_paper/export/wml_121.txt", header = TRUE)
+
+subject_data_s4 <- subject_data_s4 %>%
+  select(Patientennummer, Survey, Alter, Geschlecht) %>%
+  mutate(id = as.character(Patientennummer),
+         ses = str_replace(as.character(Survey), "Follow_Up_2", "ses-S4"),
+         age_class = cut(Alter, 
+                         breaks = c(40, 45, 50, 55, 60, 65, 70, 75),
+                         labels=c("40-44", "45-49", "50-54", "55-59", "60-64", "65-69", "70-74"))) %>%
+  select(-Patientennummer, -Survey) %>% left_join(pydeface_06)
+
+subject_data_s0 <- read.table("/home/niklas/Dropbox/White_Matter_Project/WML_Paper_Code/wml_paper/export/wml_80.txt", header = TRUE)
+
+subject_data_s0 <- subject_data_s0 %>%
+  select(Patientennummer, Survey, Alter, Geschlecht) %>%
+  mutate(id = as.character(Patientennummer),
+         ses = str_replace(as.character(Survey), "Baseline", "ses-S0") %>% str_replace("Follow_Up_2", "ses-S4"),
+         age_class = cut(Alter, 
+                         breaks = c(40, 45, 50, 55, 60, 65, 70, 75),
+                         labels=c("40-44", "45-49", "50-54", "55-59", "60-64", "65-69", "70-74"))) %>%
+  select(-Patientennummer, -Survey) %>% left_join(pydeface_06)
+
+table(subject_data_s0$age_class, subject_data_s0$Geschlecht)
+
+
+subject_data <- union(subject_data_s0, subject_data_s4)
+
+```
+
+```{r}
+library(ggplot2)
+ggplot(subject_data_s0, aes(x = Alter)) +
+  geom_histogram(bins = 5)
+```
+
+
+# Permutation loop sampling from gender and class groups one subject (14 in total)
+
+All observations drawn from S0!
+
+```{r}
+dir.create("6-BIANCA/permutation_age_class_gender/txt_files/train")
+dir.create("6-BIANCA/permutation_age_class_gender/txt_files/test")
+set.seed(142)
+
+# Here from each gender (2) and age-class (14) one subject is drawn
+
+runs = 100
+
+# due to needed subject to predict argument in BIANCA function, 
+# we add to each set one subject, that the tool is applied on,
+# and to get the classifier saved
+
+for (i in 1:runs) {
+  filename_train = paste0("6-BIANCA/permutation_age_class_gender/txt_files/train/", "random_draw_train_", sprintf("%03d", i), ".txt")
+  filename_test = paste0("6-BIANCA/permutation_age_class_gender/txt_files/test/", "random_draw_test_", sprintf("%03d", i), ".txt")
+  random_train <- subject_data %>%
+    filter(ses == "ses-S0") %>%
+    group_by(Geschlecht, age_class) %>%
+    sample_n(1, replace = FALSE) %>% 
+    ungroup() 
+  
+  
+  
+  # containing all subjects at S4 and S0 only the ones, that are not selected by random train
+  random_test <- anti_join(subject_data, random_train, 
+                           by = c("Alter", "Geschlecht", "id", "ses", "age_class", "FLAIR_BET", 
+                                  "T1_BET_to_FLAIR", "FLAIR_to_MNI", "mask", "output")) 
+  
+  # containing a subject not used in the train set at S0 or S4 for LOO in Bianca function
+  random_subject <- random_test %>%
+    filter(!id %in% random_train) %>%
+    sample_n(1)
+  
+  testing_random_subject <- anti_join(random_subject, random_train, 
+                                      by = c("Alter", "Geschlecht", "id", "ses", "age_class", "FLAIR_BET", 
+                                             "T1_BET_to_FLAIR", "FLAIR_to_MNI", "mask", "output")) %>% nrow()
+  # Testing, if subject used for prediction is really not in the training data. The printed TRUE states, that this is done!
+  print(paste0("Random subject? == ", testing_random_subject == 1,
+               " N of random subject (1)? == ", nrow(random_subject),
+               "  Length Training data: ", nrow(random_train),
+               "  Length Test data: ", nrow(random_test)))
+  
+  # Write out the masterfiles for BIANCA
+  random_train %>%
+    rbind(random_subject) %>%
+    select(FLAIR_BET, T1_BET_to_FLAIR, FLAIR_to_MNI, mask) %>% 
+    write.table(file=filename_train, quote=FALSE, sep='\t', col.names = FALSE, row.names = FALSE)
+  
+  #random_train %>% select(id, ses) %>% print()  
+  
+  random_test %>%
+    select(FLAIR_BET, T1_BET_to_FLAIR, FLAIR_to_MNI) %>%
+    write.table(file=filename_test, quote=FALSE, sep='\t', col.names = FALSE, row.names = FALSE)
+}
+```
+
+```{r}
+dir.create("6-BIANCA/permutation_age_class_gender/txt_files/trained_classifier")
+training_sets = list.files("6-BIANCA/permutation_age_class_gender/txt_files/train/", "train", full.names = TRUE)
+trained_algorithms = str_replace(training_sets, "/train/", "/trained_classifier") %>% str_replace("\\.txt", "_model")
+
+
+```
+
+# Train using the masterfiles
+
+```{r}
+output = str_replace(trained_algorithms, "$", ".nii.gz")
+
+train_bianca(training_sets, output_name = output, output_classifier = trained_algorithms)
+# These are only here to apply (also listed above!)
+
+```
+
+# Here I need to work on:
+To open each file, read out the file to segment - get the filename and make it to an output name. ID, session need to be exact! THis needs a solution before applying the trained classifiers!
+
+## Apply the trained classifiers on the test sets
+```{r}
+trained_models = list.files("6-BIANCA/permutation_age_class_gender/txt_files/trained_classifier/", "model$", full.names = TRUE)
+trained_models <- paste0(working_dir, "/", trained_models)
+test_sets = list.files("6-BIANCA/permutation_age_class_gender/txt_files/test/", "test", full.names = TRUE)
+test_sets <- paste0(working_dir, "/", test_sets)
+
+```
+
+
+
+```{r}
+application_bianca_classifiers <- function(trained_models, test_sets){
+  for (i in 1:length(trained_models)) {
+    # Clear terminal
+    cat("\014")
+    
+    # Creation of output folders
+    output_folder <- str_replace(trained_models[i], "trained_classifier/", "trained_classifier_output")
+    print(output_folder)
+    # Reading in of file list for model application
+    output_masks <- read.table(test_sets[i], sep = '\t', header = FALSE)[,1] %>% as.character() %>%
+      str_replace("/mnt/458e8a35-865f-4f0e-ab7e-8b4ac8684363/WML121_BIDS/derivatives/FSL/5-FSL_FLIRT/anat_FLAIR_defaced_pydeface/", output_folder) %>% 
+      str_replace(".nii.gz", "_BIANCA_mask")
+    # print(length(output_masks))
+    # print(head(output_masks))
+    
+    initialize_parallel(not_use = 5)
+    
+    
+    #for (j in 1:length(output_masks)){
+    
+
+    foreach (j = 1:length(output_masks)) %dopar% {
+      path_to_folder(output_masks[j])
+      cat("\014")
+
+      command <- paste0("bianca --singlefile=", test_sets[i], 
+                        " --loadclassifierdata=", trained_models[i],
+                        " --brainmaskfeaturenum=1 --querysubjectnum=", j,
+                        " --featuresubset=1,2 --matfeaturenum=3 -o ", output_masks[j] 
+                        #" -v"
+                        )
+      print(command)
+      if(file.exists(paste0(output_masks[j], ".nii.gz")) == 0) {
+        system("clear")
+        system(command)
+      }
+    }
+  }
+}
+  
+
+application_bianca_classifiers(trained_models, test_sets)
+```
+
+# Extraction of quality metrices
+
+```{r}
+files <- data.frame(masks = list.files("/mnt/458e8a35-865f-4f0e-ab7e-8b4ac8684363/WML121_BIDS/derivatives/FSL/6-BIANCA/permutation_age_class_gender/txt_files/trained_classifier_output/", "mask.nii.gz", recursive = TRUE, full.names = TRUE) %>% as.character())
+
+files <- files %>%
+  mutate(id = str_extract(masks, "sub-[:digit:]{5}") %>% str_extract("[:digit:]{5}"),
+         ses = str_extract(masks, "ses-S[:digit:]{1}"),
+         model = str_extract(masks, "train_[:digit:]{3}_model")
+         )
+
+mask <- data.frame(manual_masks = list.files("/mnt/458e8a35-865f-4f0e-ab7e-8b4ac8684363/WML121_BIDS/derivatives/FSL/5-FSL_FLIRT/manual/", 
+                                "mask_T2_space.nii.gz", recursive = TRUE, full.names = TRUE) %>% as.character())
+mask <- mask %>%
+  mutate(id = str_extract(manual_masks, "sub-[:digit:]{5}") %>% str_extract("[:digit:]{5}"),
+         ses = str_extract(manual_masks, "ses-S[:digit:]{1}"))
+
+thresh <- seq(0.0, 1, 0.1)
+thresh
+
+files_expand <- left_join(files, mask) %>%
+  mutate(output = str_replace(masks, ".nii.gz", ".txt")) %>%
+  group_by_all() %>% 
+  expand(thresh) %>% ungroup() %>%
+  mutate(output_volume_file = str_replace(output, ".txt$", paste0("_bianca_volume_thresh_", thresh, ".txt")),
+         output_performance_file = str_replace(output_volume_file, "_bianca_volume_thresh_", "_bianca_performance_thresh_"))
+```
+
+
+# Write out the mask volumes
+
+```{r}
+bianca_cluster_info(lesionmask = files_expand$masks, 
+                    threshold = files_expand$thresh,
+                    output_name = files_expand$output_volume_file)
+```
+
+```{r}
+bianca_performance(lesionmask = files_expand$masks, 
+                   threshold = files_expand$thresh, 
+                   manualmask = files_expand$manual_masks,
+                   output_name = files_expand$output_performance_file)
+```
+

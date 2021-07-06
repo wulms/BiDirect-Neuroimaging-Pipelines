@@ -1,0 +1,146 @@
+---
+title: "FSL_anat_pipeline"
+author: "Niklas Wulms"
+date: "10/16/2019"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+library(stringr)
+library(tictoc)
+library(doParallel)
+library(foreach)
+library(dplyr)
+library(tidyr)
+
+source("../tools/path_to_folder.R")
+source("./anonymize/defaceR.R")
+source("fsl_anat.R")
+
+knitr::opts_chunk$set(echo = TRUE)
+
+working_dir <- "/mnt/458e8a35-865f-4f0e-ab7e-8b4ac8684363/WML121_BIDS"
+knitr::opts_knit$set(root.dir = working_dir)
+
+setwd(working_dir)
+```
+
+# Set up parallel computing
+
+```{r}
+
+# Calculate the number of cores
+no_cores <- detectCores() - 1
+
+# Initiate cluster
+cl <- makeCluster(no_cores, type="FORK", outfile = "")
+
+registerDoParallel(cl)
+getDoParWorkers()
+```
+
+
+
+```{r}
+input_nii <- data.frame(FLAIR = list.files(working_dir, "FLAIR.nii.gz", recursive = TRUE, full.names = FALSE), 
+                        FLAIR_cropped = list.files(working_dir, "FLAIR_cropped.nii.gz", recursive = TRUE, full.names = FALSE),
+                        FLAIR_reorient2std = list.files(working_dir, "FLAIR_reorient2std.nii.gz", recursive = TRUE, full.names = FALSE),
+                        stringsAsFactors = FALSE) 
+
+input_nii <- input_nii %>%
+  mutate(
+  # FLAIR native
+  FLAIR_defaced_fsl = str_replace(input_nii$FLAIR, "FLAIR.nii", "FLAIR_defaced_fsl.nii")  %>%
+  str_replace("sourcedata", "derivatives/FSL/2-Anonymize"),
+  
+  FLAIR_defaced_pydeface = str_replace(input_nii$FLAIR, "FLAIR.nii", "FLAIR_defaced_pydeface.nii") %>%
+  str_replace("sourcedata", "derivatives/FSL/2-Anonymize"),
+  
+  FLAIR_defaced_mri_deface = str_replace(input_nii$FLAIR, "FLAIR.nii", "FLAIR_defaced_mri_deface.nii") %>%
+  str_replace("sourcedata", "derivatives/FSL/2-Anonymize"),
+  # FLAIR_cropped
+  FLAIR_cropped_defaced_fsl = str_replace(input_nii$FLAIR_cropped, "FLAIR_cropped.nii", "FLAIR_cropped_defaced_fsl.nii") %>%
+  str_replace("1-ReorientAndCrop", "2-Anonymize"),
+  
+  FLAIR_cropped_defaced_pydeface = str_replace(input_nii$FLAIR_cropped, "FLAIR_cropped.nii", "FLAIR_cropped_defaced_pydeface.nii") %>%
+  str_replace("1-ReorientAndCrop", "2-Anonymize"),
+  
+  FLAIR_cropped_defaced_mri_deface = str_replace(input_nii$FLAIR_cropped, "FLAIR_cropped.nii", "FLAIR_cropped_defaced_mri_deface.nii") %>%
+  str_replace("1-ReorientAndCrop", "2-Anonymize"),
+  # FLAIR_r2std
+  FLAIR_r2std_defaced_fsl = str_replace(input_nii$FLAIR_reorient2std, "FLAIR_reorient2std.nii", "FLAIR_reorient2std_defaced_fsl.nii") %>%
+  str_replace("1-ReorientAndCrop", "2-Anonymize"),
+    
+  FLAIR_r2std_defaced_pydeface = str_replace(input_nii$FLAIR_reorient2std, "FLAIR_reorient2std.nii", "FLAIR_reorient2std_defaced_pydeface.nii") %>%
+  str_replace("1-ReorientAndCrop", "2-Anonymize"), 
+  
+  FLAIR_r2std_defaced_mri_deface = str_replace(input_nii$FLAIR_reorient2std, "FLAIR_reorient2std.nii", "FLAIR_reorient2std_defaced_mri_deface.nii") %>%
+  str_replace("1-ReorientAndCrop", "2-Anonymize")
+)
+```
+
+
+```{r}
+
+#input[1] = input_nii$FLAIR_defaced_fsl[1]
+
+folderpath <- function(input, output_folder) {
+  paths_folder <- sub("[/][^/]+$", "", input) %>%
+    str_replace("sourcedata|derivatives/FSL/(2-Anonymize|1-ReorientAndCrop)", "derivatives/FSL/3-FSL_pipeline/anat") %>%
+    str_replace("anat", output_folder)
+  return(paths_folder)
+}
+
+a = folderpath(input_nii$FLAIR_defaced_fsl[1], "anat_FLAIR_crop")
+
+
+output_nii <- data.frame(
+  FLAIR = folderpath(input_nii$FLAIR, "anat_FLAIR"),
+  FLAIR_cropped = folderpath(input_nii$FLAIR_cropped, "anat_FLAIR_crop"),
+  FLAIR_reorient2std = folderpath(input_nii$FLAIR_reorient2std, "anat_FLAIR_reorient2std"),
+  
+  FLAIR_defaced_pydeface = folderpath(input_nii$FLAIR_defaced_pydeface, "anat_FLAIR_defaced_pydeface"),
+  FLAIR_defaced_mri_deface = folderpath(input_nii$FLAIR_defaced_mri_deface, "anat_FLAIR_defaced_mri_deface"),
+  
+  FLAIR_cropped_defaced_pydeface = folderpath(input_nii$FLAIR_cropped_defaced_pydeface, "anat_FLAIR_cropped_defaced_pydeface"),
+  FLAIR_cropped_defaced_mri_deface = folderpath(input_nii$FLAIR_cropped_defaced_mri_deface, "anat_FLAIR_cropped_defaced_mri_deface"),
+  
+  FLAIR_r2std_defaced_pydeface = folderpath(input_nii$FLAIR_r2std_defaced_pydeface, "anat_FLAIR_r2std_defaced_pydeface"),
+  FLAIR_r2std_defaced_mri_deface = folderpath(input_nii$FLAIR_r2std_defaced_mri_deface, "anat_FLAIR_r2std_defaced_mri_deface"),
+  
+  FLAIR_cropped_defaced_fsl = folderpath(input_nii$FLAIR_cropped_defaced_fsl, "anat_FLAIR_cropped_defaced_fsl"),
+  FLAIR_r2std_defaced_fsl = folderpath(input_nii$FLAIR_r2std_defaced_fsl, "anat_FLAIR_r2std_defaced_fsl"),
+  stringsAsFactors = FALSE)
+
+path_to_folder(output_nii$FLAIR)
+path_to_folder(output_nii$FLAIR_cropped)
+path_to_folder(output_nii$FLAIR_reorient2std)
+path_to_folder(output_nii$FLAIR_defaced_pydeface)
+path_to_folder(output_nii$FLAIR_defaced_mri_deface)
+path_to_folder(output_nii$FLAIR_cropped_defaced_pydeface)
+path_to_folder(output_nii$FLAIR_cropped_defaced_mri_deface)
+path_to_folder(output_nii$FLAIR_r2std_defaced_pydeface)
+path_to_folder(output_nii$FLAIR_r2std_defaced_mri_deface)
+
+path_to_folder(output_nii$FLAIR_cropped_defaced_fsl)
+path_to_folder(output_nii$FLAIR_r2std_defaced_fsl)
+```
+
+```{r}
+
+
+fsl_anat_t2(input_nii$FLAIR ,output_nii$FLAIR)
+fsl_anat_t2(input_nii$FLAIR_cropped ,output_nii$FLAIR_cropped)
+fsl_anat_t2(input_nii$FLAIR_reorient2std ,output_nii$FLAIR_reorient2std)
+fsl_anat_t2(input_nii$FLAIR_defaced_pydeface ,output_nii$FLAIR_defaced_pydeface)
+fsl_anat_t2(input_nii$FLAIR_defaced_mri_deface ,output_nii$FLAIR_defaced_mri_deface)
+fsl_anat_t2(input_nii$FLAIR_cropped_defaced_pydeface ,output_nii$FLAIR_cropped_defaced_pydeface)
+fsl_anat_t2(input_nii$FLAIR_cropped_defaced_mri_deface ,output_nii$FLAIR_cropped_defaced_mri_deface)
+fsl_anat_t2(input_nii$FLAIR_r2std_defaced_pydeface ,output_nii$FLAIR_r2std_defaced_pydeface)
+fsl_anat_t2(input_nii$FLAIR_r2std_defaced_mri_deface ,output_nii$FLAIR_r2std_defaced_mri_deface)
+
+fsl_anat_t2(input_nii$FLAIR_cropped_defaced_fsl ,output_nii$FLAIR_cropped_defaced_fsl)
+fsl_anat_t2(input_nii$FLAIR_r2std_defaced_fsl ,output_nii$FLAIR_r2std_defaced_fsl)
+
+```
+

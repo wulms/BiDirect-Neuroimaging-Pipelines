@@ -1,0 +1,82 @@
+---
+title: "extract_ROI_information_FA_MD"
+author: "Niklas Wulms"
+date: "10/21/2019"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+library(stringr)
+library(tictoc)
+library(doParallel)
+library(foreach)
+
+source("../tools/path_to_folder.R")
+
+
+knitr::opts_chunk$set(echo = TRUE)
+
+working_dir <- "/media/niklas/spaceC/WML121_BIDS_2/"
+knitr::opts_knit$set(root.dir = working_dir)
+
+setwd(working_dir)
+```
+
+# Set up parallel computing
+
+```{r}
+
+# Calculate the number of cores
+no_cores <- detectCores() - 1
+
+# Initiate cluster
+cl <- makeCluster(no_cores, type="FORK", outfile = "")
+
+registerDoParallel(cl)
+getDoParWorkers()
+```
+
+
+# Find the existing FA / MD images, skeletonized too
+
+```{r}
+# error in naming files during processing in PSMD (FA named, right name is MD)
+
+MD_native = list.files(working_dir, "temp-DTI_FA.nii.gz", recursive = TRUE, full.names = TRUE) 
+MD_native = MD_native[str_detect(MD_native, "MD")]
+
+
+input_nii <- data.frame(FA_native = list.files(working_dir, "temp-DTI_FA_FA.nii.gz", recursive = TRUE, full.names = TRUE),
+                        MD_native = MD_native,
+                        
+                        PSMD_txt = list.files(working_dir, "psmd.txt", recursive = TRUE, full.names = TRUE),
+                        
+                        FA_MNI152 = list.files(working_dir, "all_FA.nii.gz", recursive = TRUE, full.names = TRUE),
+                        MD_MNI152 = list.files(working_dir, "all_MD.nii.gz", recursive = TRUE, full.names = TRUE),
+                        FA_skeleton = list.files(working_dir, "FA_skeletonised.nii.gz", recursive = TRUE, full.names = TRUE),
+                        MD_skeleton = list.files(working_dir, "MD_skeletonised.nii.gz", recursive = TRUE, full.names = TRUE),
+                        
+                        MNI_atlas = "/usr/local/fsl/data/atlases/MNI/MNI-maxprob-thr50-2mm.nii.gz",
+                        
+                        subject = str_extract(MD_native, "[:digit:]{5}"), 
+                        session = str_extract(MD_native, "ses-[:digit:]{1}"),
+
+                        stringsAsFactors = F)
+
+
+
+input_nii
+
+```
+
+```{r}
+output_nii <- data.frame(subject_session = paste0(input_nii$subject, "_", input_nii$session))
+
+
+```
+
+
+
+
+
+

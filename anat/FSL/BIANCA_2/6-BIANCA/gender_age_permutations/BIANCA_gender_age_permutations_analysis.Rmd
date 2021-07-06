@@ -1,0 +1,137 @@
+---
+title: "BIANCA_gender_age_permutation_analysis"
+author: "Niklas Wulms"
+date: "2/11/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+#merged_LOO_expand$performance_string <-scan(merged_LOO_expand$output_performance_file, what="character")
+
+for (i in 1:length(merged_LOO_expand$output_performance_file)) {
+  string <- paste0(scan(merged_LOO_expand$output_performance_file[i], what="character"), collapse=" ")
+  cat("\014")
+  print(paste0(i, " of ", length(merged_LOO_expand$output_performance_file)))
+  merged_LOO_expand$performance_string[i] <- string
+  
+}
+```
+
+```{r}
+#files_expand$output_volume_string <- 1
+
+for (i in 1:length(files_expand$output_volume_file)) {
+  string <- paste0(scan(files_expand$output_volume_file[i], what="character"), collapse=" ")
+  cat("\014")
+  print(paste0(i, " of ", length(files_expand$output_volume_file)))
+  files_expand$output_volume_string[i] <- string
+}
+```
+
+```{r}
+files_expand$output_volume <- str_extract(files_expand$output_volume_string, "(?<= is )([:digit:]*.[:digit:]*|[:digit:]*)$") 
+
+```
+
+# Calculate Volume of manual masks
+
+```{r}
+mask <- mask %>% 
+  mutate(volume_file = str_replace(manual_masks, ".nii.gz", "_bianca_volume.txt"))
+
+bianca_cluster_info(lesionmask = mask$manual_masks, 
+                    threshold = 0,
+                    output_name = mask$volume_file)
+
+for (i in 1:length(mask$volume_file)) {
+  string <- paste0(scan(mask$volume_file[i], what="character"), collapse=" ")
+  cat("\014")
+  print(paste0(i, " of ", length(mask$volume_file)))
+  mask$output_volume_string[i] <- string
+}
+
+mask$output_volume_manual <- str_extract(mask$output_volume_string, "(?<= is )([:digit:]*.[:digit:]*|[:digit:]*)$") 
+
+mask_volume <- mask %>%
+  select(manual_masks, id, ses, output_volume_manual)
+
+files_expand2 %>% left_join(mask_volume)
+```
+
+
+
+```{r fig.width = 20, fig.height= 15}
+library(ggplot2)
+library(forcats)
+
+files_expand2 <- files_expand %>%
+#  filter(model == "train_001_model") %>%
+  left_join(mask_volume) %>%
+  mutate(thresh = as.character(thresh),
+         output_volume = as.numeric(output_volume),
+         output_volume_manual = as.numeric(output_volume_manual),
+         output_volume_diff = (output_volume - output_volume_manual),
+         output_volume_mean = (output_volume + output_volume_manual) / 2,
+         model = as.factor(model))
+
+files_expand2%>%
+  group_by(model, thresh) %>%
+  summarize(median = median(output_volume)) %>%
+  ungroup() %>%
+  left_join(files_expand2) %>%
+  mutate(model = fct_reorder(model, median)) %>%
+ggplot(aes(x = model, y = output_volume)) +
+  geom_boxplot() +
+  facet_wrap(~ thresh, nrow = 1, ncol = 11) +
+  coord_flip(ylim = c(0, 10000)) +
+  ggtitle("BIANCA volume boxplots of each model and each threshold")
+
+files_expand2%>%
+  group_by(model, thresh) %>%
+  summarize(median = median(output_volume_diff)) %>%
+  ungroup() %>%
+  left_join(files_expand2) %>%
+  mutate(model = fct_reorder(model, median)) %>%
+ggplot(aes(x = model, y = output_volume_diff)) +
+  geom_boxplot() +
+  facet_wrap(~ thresh, nrow = 1, ncol = 11) +
+  coord_flip(ylim = c(-2500, 2500)) +
+  ggtitle("Difference (BIANCA volume - manual volume) of each model and each threshold")
+  
+```
+
+# Bland-Altman Plots
+
+```{r fig.width = 20, fig.height = 100}
+files_expand2_mean <- files_expand2 %>% 
+  group_by(thresh, model) %>%
+  summarise(mean_vol = mean(output_volume_diff),
+            sd_vol = sd(output_volume_diff)) %>% 
+  select(thresh, model, mean_vol, sd_vol) %>%
+  ungroup()
+
+
+ggplot(files_expand2, aes(x = output_volume_mean, y = output_volume_diff)) +
+  geom_point(alpha = 0.25) + 
+    facet_grid(model ~ thresh, scales = "free_x") +
+  geom_hline(data=files_expand2_mean, aes(yintercept = mean_vol), colour = "blue", size = 0.5) +
+  geom_hline(data=files_expand2_mean, aes(yintercept = (mean_vol - (1.96 * sd_vol))), colour = "red", size = 0.5) +
+  geom_hline(data=files_expand2_mean, aes(yintercept = (mean_vol + (1.96 * sd_vol))), colour = "red", size = 0.5) +
+  xlab("Average Volume") +
+  ylab("Diff. Between Methods")
+
+ggplot(files_expand2, aes(x = output_volume_mean, y = output_volume_diff)) +
+  geom_point(alpha = 0.25) + 
+    facet_grid(model ~ thresh, scales = "free") +
+  geom_hline(data=files_expand2_mean, aes(yintercept = mean_vol), colour = "blue", size = 0.5) +
+  geom_hline(data=files_expand2_mean, aes(yintercept = (mean_vol - (1.96 * sd_vol))), colour = "red", size = 0.5) +
+  geom_hline(data=files_expand2_mean, aes(yintercept = (mean_vol + (1.96 * sd_vol))), colour = "red", size = 0.5) +
+  xlab("Average Volume") +
+  ylab("Diff. Between Methods")+
+  coord_cartesian(ylim = c(-5000, 5000))
+
+```

@@ -1,0 +1,189 @@
+---
+title: "Preprocessing_QC"
+author: "Niklas Wulms"
+date: "10/16/2019"
+output: html_document
+---
+```{r setup, include=FALSE}
+library(stringr)
+library(doParallel)
+library(foreach)
+library(tidyr)
+library(dplyr)
+
+source("../2-image_quality/qc_fsleyes.R")
+source("../tools/path_to_folder.R")
+
+knitr::opts_chunk$set(echo = TRUE)
+
+working_dir <- "/media/niklas/spaceC/WML121_BIDS"
+
+knitr::opts_knit$set(root.dir = working_dir)
+
+setwd(working_dir)
+```
+
+# Parallel setup
+
+```{r}
+
+# Calculate the number of cores
+no_cores <- detectCores() - 1
+
+# Initiate cluster
+cl <- makeCluster(no_cores, type="FORK", outfile = "")
+
+registerDoParallel(cl)
+getDoParWorkers()
+```
+
+# input images
+
+```{r}
+
+derivatives_dir <- "/media/niklas/spaceC/WML121_BIDS/derivatives/FSL/3-FSL_pipeline/"
+
+scan <- "T1_fast_restore.nii.gz"
+
+fsl_anat_nii <- data.frame(
+  # raw input and first preprocs
+  T1 = list.files(paste0(derivatives_dir, "anat_T1"), scan, recursive = T, full.names = T),
+  T1_reorient2std = list.files(paste0(derivatives_dir, "anat_T1_crop"), scan, recursive = T, full.names = T),
+  T1_cropped = list.files(paste0(derivatives_dir, "anat_T1_reorient2std"), scan, recursive = T, full.names = T),
+  # defacing
+  T1_defaced_mri = list.files(paste0(derivatives_dir, "anat_T1_defaced_mri_deface"), scan, recursive = T, full.names = T),
+  T1_defaced_pydeface = list.files(paste0(derivatives_dir, "anat_T1_defaced_pydeface"), scan, recursive = T, full.names = T),
+  
+  T1_reorient2std_defaced_mri = list.files(paste0(derivatives_dir, "anat_T1_r2std_defaced_mri_deface"), scan, recursive = T, full.names = T),
+  T1_reorient2std_defaced_pydeface = list.files(paste0(derivatives_dir, "anat_T1_r2std_defaced_pydeface"), scan, recursive = T, full.names = T),
+  
+  T1_cropped_defaced_mri = list.files(paste0(derivatives_dir, "anat_T1_cropped_defaced_mri_deface"), scan, recursive = T, full.names = T),
+  T1_cropped_defaced_pydeface = list.files(paste0(derivatives_dir, "anat_T1_cropped_defaced_pydeface"), scan, recursive = T, full.names = T),
+  
+  stringsAsFactors = F
+)
+
+head(fsl_anat_nii)
+str(fsl_anat_nii)
+```
+
+```{r}
+fsl_anat_png <- data.frame(
+  T1_raw = str_replace(input_nii$T1_defaced_pydeface, "derivatives/FSL/2-Anonymize/sub-[:digit:]{5}/ses-S[:digit:]{1}/anat", "qualitycontrol/3-fsl_anat/raw") %>% 
+    str_replace(".nii.gz", "_comp_fsl_anat_raw.jpg"),
+  T1_mri_deface = str_replace(input_nii$T1_defaced_mri, "derivatives/FSL/2-Anonymize/sub-[:digit:]{5}/ses-S[:digit:]{1}/anat", "qualitycontrol/3-fsl_anat/mri_deface") %>% 
+    str_replace(".nii.gz", "_comp_fsl_anat_mri_deface.jpg"),
+  T1_pydeface = str_replace(input_nii$T1_defaced_pydeface, "derivatives/FSL/2-Anonymize/sub-[:digit:]{5}/ses-S[:digit:]{1}/anat", "qualitycontrol/3-fsl_anat/pydeface") %>% 
+    str_replace(".nii.gz", "_comp_fsl_anat_pydeface.jpg"),
+  
+  T1_raw2 = str_replace(input_nii$T1_defaced_pydeface, "derivatives/FSL/2-Anonymize/sub-[:digit:]{5}/ses-S[:digit:]{1}/anat", "qualitycontrol/3-fsl_anat/T1") %>% 
+    str_replace(".nii.gz", "_comp_fsl_anat_T1_raw.jpg"),
+  T1_reorient2std = str_replace(input_nii$T1_defaced_mri, "derivatives/FSL/2-Anonymize/sub-[:digit:]{5}/ses-S[:digit:]{1}/anat", "qualitycontrol/3-fsl_anat/T1") %>% 
+    str_replace(".nii.gz", "_comp_fsl_anat_T1_reorient.jpg"),
+  T1_cropped = str_replace(input_nii$T1_defaced_pydeface, "derivatives/FSL/2-Anonymize/sub-[:digit:]{5}/ses-S[:digit:]{1}/anat", "qualitycontrol/3-fsl_anat/T1") %>% 
+    str_replace(".nii.gz", "_comp_fsl_anat_T1_cropped.jpg"),
+  
+  stringsAsFactors = FALSE
+)
+
+dir.create("qualitycontrol/3-fsl_anat/raw", recursive = TRUE)
+dir.create("qualitycontrol/3-fsl_anat/mri_deface", recursive = TRUE)
+dir.create("qualitycontrol/3-fsl_anat/pydeface", recursive = TRUE)
+
+dir.create("qualitycontrol/3-fsl_anat/T1", recursive = TRUE)
+
+
+```
+
+# Create FSLeyes images for each subject to look for best performing data, when using Pydeface or MRI_deface
+- based on input data
+
+# Comparison of the input_data type
+```{r}
+qc_fsleyes_defacing(fsl_anat_nii$T1_reorient2std, fsl_anat_nii$T1, fsl_anat_nii$T1_cropped, 
+                    output_t1 = fsl_anat_png$T1_raw,
+                    slice_spacing = 6.5)
+
+qc_fsleyes_defacing(fsl_anat_nii$T1_reorient2std_defaced_mri, fsl_anat_nii$T1_defaced_mri, fsl_anat_nii$T1_cropped_defaced_mri, 
+                    output_t1 = fsl_anat_png$T1_mri_deface,
+                    slice_spacing = 6.5)
+
+qc_fsleyes_defacing(fsl_anat_nii$T1_reorient2std_defaced_pydeface, fsl_anat_nii$T1_pydeface, fsl_anat_nii$T1_cropped_defaced_pydeface, 
+                    output_t1 = fsl_anat_png$T1_pydeface,
+                    slice_spacing = 6.5)
+```
+
+# Choose the best data of Pydeface and MRI_deface and compare both with other
+- based on algorithms
+
+# Comparison of the defacing influence
+
+```{r}
+qc_fsleyes_defacing(fsl_anat_nii$T1_reorient2std, fsl_anat_nii$T1_reorient2std_defaced_mri, fsl_anat_nii$T1_reorient2std_defaced_pydeface, 
+                    output_t1 = fsl_anat_png$T1_raw2,
+                    slice_spacing = 6.5)
+
+qc_fsleyes_defacing(fsl_anat_nii$T1_reorient2std, fsl_anat_nii$T1_defaced_mri, fsl_anat_nii$T1_pydeface, 
+                    output_t1 = fsl_anat_png$T1_reorient2std,
+                    slice_spacing = 6.5)
+
+qc_fsleyes_defacing(fsl_anat_nii$T1_cropped, fsl_anat_nii$T1_cropped_defaced_mri, fsl_anat_nii$T1_cropped_defaced_pydeface, 
+                    output_t1 = fsl_anat_png$T1_cropped,
+                    slice_spacing = 6.5)
+```
+
+## Selection of the most disturbed patient preprocessings (seen above)
+
+patient 30060, 30071, 30135, 30067
+
+```{r}
+fsl_anat_nii_selection <- data.frame(
+  # raw input and first preprocs
+  T1_biascorr = list.files(derivatives_dir, "T1_biascorr.nii.gz", recursive = TRUE, full.names = TRUE),
+  T1_brain_mask = list.files(derivatives_dir, "T1_biascorr_brain_mask.nii.gz", recursive = TRUE, full.names = TRUE),
+  
+  stringsAsFactors = F
+) %>%
+  mutate(id = str_extract(T1_biascorr, "[:digit:]{5}")) %>%
+  filter(id %in% c("30060", "30071", "30135", "30067")) %>%
+  mutate(output = str_replace(T1_brain_mask, "//", "/") %>% str_replace("derivatives/FSL/3-FSL_pipeline/", "qualitycontrol/3-fsl_anat_selection/") %>%
+           str_replace("/(?=sub-[:digit:]{5})", "_") %>% str_replace("/(?=ses-S[:digit:]{1})", "_") %>% str_replace("/anat.anat/", "_") %>% str_replace("nii.gz", "png")
+           
+           )
+
+```
+
+```{r}
+qc_fsleyes_defacing_1(fsl_anat_nii_selection$T1_biascorr, fsl_anat_nii_selection$T1_brain_mask,
+                      output_t1 = fsl_anat_nii_selection$output,
+                      slice_spacing = 6.5)
+```
+
+
+```{r}
+fsl_anat_selection_pngs <- data.frame(
+  pngs = list.files(paste0(working_dir, "/qualitycontrol"), "png", recursive = TRUE, full.names = TRUE),
+  stringsAsFactors = FALSE
+)
+```
+
+```{r}
+fsl_anat_selection_pngs <- fsl_anat_selection_pngs %>%
+  mutate(id = str_extract(pngs, "[:digit:]{5}"),
+         ses = str_extract(pngs, "ses-S[:digit:]{1}"),
+         sequence = str_extract(pngs, "[:graph:]*(?=_sub-[:digit:]{5})") %>% str_replace(paste0(working_dir, "/qualitycontrol/3-fsl_anat_selection/anat_"), "") %>% as.factor()
+  )
+
+test <- fsl_anat_selection_pngs %>%
+  pivot_wider(names_from = sequence, values_from = pngs) %>%
+  mutate(out = paste0(id, "_", ses, ".png"))
+```
+
+
+```{r}
+collage_nine(test$T1, test$T1_defaced_mri_deface, test$T1_defaced_pydeface,
+             test$T1_reorient2std, test$T1_r2std_defaced_mri_deface, test$T1_r2std_defaced_pydeface,
+             test$T1_crop, test$T1_cropped_defaced_mri_deface, test$T1_cropped_defaced_pydeface,
+             test$out, high_res = TRUE, low_res = TRUE)
+```
+

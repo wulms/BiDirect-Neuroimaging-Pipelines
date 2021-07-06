@@ -1,0 +1,190 @@
+---
+title: "BIANCA_permutation_tests"
+author: "Niklas Wulms"
+date: "2/11/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+library(readr)
+library(stringr)
+library(doParallel)
+library(foreach)
+library(tidyr)
+library(dplyr)
+
+# source("/anat/fsl/fsl_BIANCA.R")
+source("/home/niklas/Coding/bidirect-neuroimaging-processing/tools/path_to_folder.R")
+source("/home/niklas/Coding/bidirect-neuroimaging-processing/anat/fsl/fsl_BIANCA.R")
+
+knitr::opts_chunk$set(echo = TRUE)
+
+working_dir <- "/mnt/458e8a35-865f-4f0e-ab7e-8b4ac8684363/WML121_BIDS/derivatives/FSL"
+knitr::opts_knit$set(root.dir = working_dir)
+```
+
+# find nii files
+
+```{r}
+nii_files <- data.frame(
+  # raw input and first preprocs
+  FLAIR_BET = list.files("/mnt/458e8a35-865f-4f0e-ab7e-8b4ac8684363/WML121_BIDS/derivatives/FSL/5-FSL_FLIRT/anat_FLAIR_defaced_pydeface/",
+                                             "T2_masked_0\\.(0|4)_biascorr_(fsl|py)deface_(06|12)_inverse.nii.gz", recursive = TRUE, full.names = TRUE),
+  T1_BET_to_FLAIR = list.files("/mnt/458e8a35-865f-4f0e-ab7e-8b4ac8684363/WML121_BIDS/derivatives/FSL/5-FSL_FLIRT/anat_FLAIR_defaced_pydeface/",
+                                                  "T1_0\\.(0|4)_biascorr_(fsl|py)deface_(06|12)_inverse.nii.gz", recursive = TRUE, full.names = TRUE),
+  FLAIR_to_MNI  = list.files("/mnt/458e8a35-865f-4f0e-ab7e-8b4ac8684363/WML121_BIDS/derivatives/FSL/5-FSL_FLIRT/anat_FLAIR_defaced_pydeface/", 
+                                "FLAIR_to_MNI.mat", recursive = TRUE, full.names = TRUE),
+  
+  stringsAsFactors = F)             
+
+
+
+dir.create("6-BIANCA")
+
+pydeface_06 <- nii_files %>%
+  filter(str_detect(FLAIR_BET, "pydeface_06") == 1) %>%
+  mutate(mask  = list.files("/mnt/458e8a35-865f-4f0e-ab7e-8b4ac8684363/WML121_BIDS/derivatives/FSL/5-FSL_FLIRT/manual/", 
+                                "mask_T2_space.nii.gz", recursive = TRUE, full.names = TRUE),
+         output = str_replace(FLAIR_BET, "/5-FSL_FLIRT/anat_FLAIR_defaced_pydeface/", "/6-BIANCA/") %>%
+           str_replace("_inverse", "_inverse_BIANCA_mask"),
+         id = str_extract(output, "sub-[:digit:]{5}") %>% str_extract("[:digit:]{5}"),
+         ses = str_extract(output, "ses-S[:digit:]{1}")) 
+
+```
+
+```{r}
+
+```
+
+## Models based on properties (age, gender)
+
+```{r}
+subject_data_s4 <- read.table("/home/niklas/Dropbox/White_Matter_Project/WML_Paper_Code/wml_paper/export/wml_121.txt", header = TRUE)
+
+subject_data_s4 <- subject_data_s4 %>%
+  select(Patientennummer, Survey, Alter, Geschlecht) %>%
+  mutate(id = as.character(Patientennummer),
+         ses = str_replace(as.character(Survey), "Follow_Up_2", "ses-S4")) %>%
+  select(-Patientennummer, -Survey) %>% left_join(pydeface_06)
+
+subject_data_s0 <- read.table("/home/niklas/Dropbox/White_Matter_Project/WML_Paper_Code/wml_paper/export/wml_80.txt", header = TRUE)
+
+subject_data_s0 <- subject_data_s0 %>%
+  select(Patientennummer, Survey, Alter, Geschlecht) %>%
+  mutate(id = as.character(Patientennummer),
+         ses = str_replace(as.character(Survey), "Baseline", "ses-S0") %>% str_replace("Follow_Up_2", "ses-S4")) %>%
+  select(-Patientennummer, -Survey) %>% left_join(pydeface_06)
+
+
+
+subject_data <- union(subject_data_s0, subject_data_s4)
+
+```
+
+
+
+```{r}
+dir.create("6-BIANCA/permutation_tests/txt_files/train", recursive = TRUE)
+dir.create("6-BIANCA/permutation_tests/txt_files/test", recursive = TRUE)
+set.seed(142)
+
+# Here from each gender (2) and age-class (14) one subject is drawn
+
+permutation_bianca <- function(runs, draws) {
+  # due to needed subject to predict argument in BIANCA function, 
+  # we add to each set one subject, that the tool is applied on,
+  # and to get the classifier saved
+  
+  for (i in 1:runs) {
+    filename_train = paste0("6-BIANCA/permutation_tests/txt_files/train/", "random_draw_", draws, "_train_", sprintf("%03d", i), ".txt")
+    filename_test = paste0("6-BIANCA/permutation_tests/txt_files/test/", "random_draw_", draws, "_test_", sprintf("%03d", i), ".txt")
+    random_train <- subject_data %>%
+  #    filter(ses == "ses-S0") %>%
+      group_by(id) %>%
+      mutate(count = n()) %>%
+      filter(count == 2) %>%
+      select(-count) %>%
+      sample_n(1, replace = FALSE) %>% 
+      ungroup() %>% 
+      sample_n(draws)
+    
+    
+    
+    # containing all subjects at S4 and S0 only the ones, that are not selected by random train
+    random_test <- anti_join(subject_data, random_train, 
+                             by = c("Alter", "Geschlecht", "id", "ses", "FLAIR_BET", 
+                                    "T1_BET_to_FLAIR", "FLAIR_to_MNI", "mask", "output")) 
+    
+    # containing a subject not used in the train set at S0 or S4 for LOO in Bianca function
+    random_subject <- random_test %>%
+      filter(!id %in% random_train) %>%
+      sample_n(1)
+    
+    testing_random_subject <- anti_join(random_subject, random_train, 
+                                        by = c("Alter", "Geschlecht", "id", "ses", "FLAIR_BET", 
+                                               "T1_BET_to_FLAIR", "FLAIR_to_MNI", "mask", "output")) %>% nrow()
+    # Testing, if subject used for prediction is really not in the training data. The printed TRUE states, that this is done!
+    print(paste0("Random subject? == ", testing_random_subject == 1,
+                 " N of random subject (1)? == ", nrow(random_subject),
+                 "  Length Training data: ", nrow(random_train),
+                 "  Length Test data: ", nrow(random_test)))
+    
+    # Write out the masterfiles for BIANCA
+    random_train %>%
+      rbind(random_subject) %>%
+      select(FLAIR_BET, T1_BET_to_FLAIR, FLAIR_to_MNI, mask) %>% 
+      write.table(file=filename_train, quote=FALSE, sep='\t', col.names = FALSE, row.names = FALSE)
+    
+    #random_train %>% select(id, ses) %>% print()  
+    
+    random_test %>%
+      select(FLAIR_BET, T1_BET_to_FLAIR, FLAIR_to_MNI) %>%
+      write.table(file=filename_test, quote=FALSE, sep='\t', col.names = FALSE, row.names = FALSE)
+  }
+}
+```
+
+
+```{r}
+set.seed(142)
+permutation_bianca(runs = 100, draws = 10)
+permutation_bianca(runs = 100, draws = 15)
+permutation_bianca(runs = 100, draws = 20)
+permutation_bianca(runs = 100, draws = 25)
+permutation_bianca(runs = 100, draws = 30)
+permutation_bianca(runs = 100, draws = 35)
+permutation_bianca(runs = 100, draws = 40)
+```
+
+```{r}
+dir.create("6-BIANCA/permutation_tests/txt_files/trained_classifier")
+training_sets = list.files("6-BIANCA/permutation_tests/txt_files/train/", "train", full.names = TRUE)
+trained_algorithms = str_replace(training_sets, "/train/", "/trained_classifier") %>% str_replace("\\.txt", "_model")
+
+
+```
+
+# Train using the masterfiles
+
+```{r}
+output = str_replace(trained_algorithms, "$", ".nii.gz")
+
+train_bianca(training_sets, output_name = output, output_classifier = trained_algorithms)
+# These are only here to apply (also listed above!)
+
+```
+
+```{r}
+trained_models = list.files("6-BIANCA/permutation_tests/txt_files/trained_classifier/", "model$", full.names = TRUE)
+trained_models <- paste0(working_dir, "/", trained_models)
+test_sets = list.files("6-BIANCA/permutation_tests/txt_files/test/", "test", full.names = TRUE)
+test_sets <- paste0(working_dir, "/", test_sets)
+```
+
+```{r}
+application_bianca_classifiers(trained_models, test_sets)
+```
+
+
+
+

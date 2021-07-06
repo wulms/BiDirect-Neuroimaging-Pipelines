@@ -1,0 +1,122 @@
+---
+title: "reorient and crop FOV"
+author: "Niklas Wulms"
+date: "10/14/2019"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+library(stringr)
+library(tictoc)
+library(doParallel)
+library(foreach)
+
+
+source("../tools/path_to_folder.R")
+
+knitr::opts_chunk$set(echo = TRUE)
+
+working_dir <- "/mnt/458e8a35-865f-4f0e-ab7e-8b4ac8684363/WML121_BIDS"
+knitr::opts_knit$set(root.dir = working_dir)
+
+setwd(working_dir)
+```
+
+
+# Set up parallel computing
+
+```{r}
+
+# Calculate the number of cores
+no_cores <- detectCores() - 1
+
+# Initiate cluster
+cl <- makeCluster(no_cores, type="FORK", outfile = "")
+
+registerDoParallel(cl)
+getDoParWorkers()
+```
+
+# Find the existing T1 images
+
+```{r}
+T1 <- list.files(working_dir, "T1w.nii.gz", recursive = TRUE, full.names = FALSE)
+FLAIR <- list.files(working_dir, "FLAIR.nii.gz", recursive = TRUE, full.names = FALSE)
+
+input_nii <- data.frame(T1 = T1, FLAIR = FLAIR, stringsAsFactors = F)
+```
+
+
+## fslreorient2std & robustfov
+
+```{r}
+input_nii$T1_reorient2std <- str_replace(input_nii$T1, "T1w.nii.gz", "T1w_reorient2std.nii.gz") %>%
+  str_replace("sourcedata", "derivatives/FSL/1-ReorientAndCrop")
+
+input_nii$T1_cropped <- str_replace(input_nii$T1, "T1w.nii.gz", "T1w_cropped.nii.gz") %>%
+  str_replace("sourcedata", "derivatives/FSL/1-ReorientAndCrop")
+
+# custom function that creates folders for filepaths (extracting the folder path)
+path_to_folder(input_nii$T1_cropped)
+```
+
+## FLAIR: fslreorient2std & robustfov
+
+```{r}
+input_nii$FLAIR_reorient2std <- str_replace(input_nii$FLAIR, "FLAIR.nii.gz", "FLAIR_reorient2std.nii.gz") %>%
+  str_replace("sourcedata", "derivatives/FSL/1-ReorientAndCrop")
+
+input_nii$FLAIR_cropped <- str_replace(input_nii$FLAIR, "FLAIR.nii.gz", "FLAIR_cropped.nii.gz") %>%
+  str_replace("sourcedata", "derivatives/FSL/1-ReorientAndCrop")
+
+# custom function that creates folders for filepaths (extracting the folder path)
+path_to_folder(input_nii$T1_cropped)
+```
+
+
+
+
+fslreorient2std input output
+
+robustfov -i input -r output_crop
+
+```{r}
+foreach (i = 1:length(input_nii$T1)) %dopar% {
+
+  command = paste0("fslreorient2std ",
+                   input_nii$T1[i], " ",
+                   input_nii$T1_reorient2std[i])
+  
+  command2 = paste0("robustfov ",
+                   "-i ", input_nii$T1_reorient2std[i], " ",
+                   "-r ", input_nii$T1_cropped[i])
+                   
+  system(command)
+  system(command2)
+
+}
+```
+
+```{r}
+foreach (i = 1:length(input_nii$FLAIR)) %dopar% {
+
+  command = paste0("fslreorient2std ",
+                   input_nii$FLAIR[i], " ",
+                   input_nii$FLAIR_reorient2std[i])
+  
+  command2 = paste0("robustfov ",
+                   "-i ", input_nii$FLAIR_reorient2std[i], " ",
+                   "-r ", input_nii$FLAIR_cropped[i])
+                   
+  system(command)
+  system(command2)
+
+}
+```
+
+
+
+
+
+
+

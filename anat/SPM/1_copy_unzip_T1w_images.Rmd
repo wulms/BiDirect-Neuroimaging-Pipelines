@@ -1,0 +1,46 @@
+---
+title: "Copy_and_unzip_T1w_images"
+author: "Niklas Wulms"
+date: "10/17/2019"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+library(stringr)
+library(doParallel)
+library(foreach)
+
+source("../../tools/path_to_folder.R")
+
+
+knitr::opts_chunk$set(echo = TRUE)
+
+working_dir <- "/media/niklas/My Book/Bidirect_Dicom/BIDS/base_protocol"
+knitr::opts_knit$set(root.dir = working_dir)
+
+setwd(working_dir)
+```
+
+
+```{r}
+T1w <- list.files(working_dir, "T1.nii.gz", recursive = TRUE, full.names = TRUE)
+
+T1w_output <- T1w %>% 
+  str_replace("Bidirect_Dicom/", "") %>%
+  str_replace("BIDS", "BIDS/derivatives/SPM") %>%
+  str_replace("nii.gz", "nii")
+  
+path_to_folder(T1w_output)
+
+print(paste0("gunzip -c '", T1w[1], "' > '", T1w_output[1], "'"))  
+```
+
+```{r}
+library(R.utils)
+
+for (i in 1:length(T1w)) {
+  print(paste0("Data ", i, " of ", length(T1w)))
+  gunzip(T1w[i], destname = T1w_output[i], remove=FALSE, skip = TRUE)
+}
+```
+

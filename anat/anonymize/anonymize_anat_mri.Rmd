@@ -1,0 +1,231 @@
+---
+title: "Anonymize_MRI"
+author: "Niklas Wulms"
+date: "10/14/2019"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+library(stringr)
+library(tictoc)
+library(doParallel)
+library(foreach)
+
+source("../../tools/path_to_folder.R")
+source("defaceR.R")
+
+
+knitr::opts_chunk$set(echo = TRUE)
+
+working_dir <- "/mnt/458e8a35-865f-4f0e-ab7e-8b4ac8684363/WML121_BIDS"
+knitr::opts_knit$set(root.dir = working_dir)
+
+setwd(working_dir)
+```
+
+# Set up parallel computing
+
+```{r}
+
+# Calculate the number of cores
+no_cores <- detectCores() - 1
+
+# Initiate cluster
+cl <- makeCluster(no_cores, type="FORK", outfile = "")
+
+registerDoParallel(cl)
+getDoParWorkers()
+```
+
+# Find the existing T1 images
+
+```{r}
+input_nii <- data.frame(T1 = list.files(working_dir, "T1w.nii.gz", recursive = TRUE, full.names = TRUE), 
+                        T1_cropped = list.files(working_dir, "T1w_cropped.nii.gz", recursive = TRUE, full.names = TRUE),
+                        T1_reorient2std = list.files(working_dir, "T1w_reorient2std.nii.gz", recursive = TRUE, full.names = TRUE),
+                        stringsAsFactors = F)
+
+
+```
+
+```{r}
+output_nii <- data.frame(
+  # T1 native
+  T1_defaced_fsl = str_replace(input_nii$T1, "T1w.nii", "T1w_defaced_fsl.nii")  %>%
+  str_replace("sourcedata", "derivatives/FSL/2-Anonymize"),
+  
+  T1_defaced_pydeface = str_replace(input_nii$T1, "T1w.nii", "T1w_defaced_pydeface.nii") %>%
+  str_replace("sourcedata", "derivatives/FSL/2-Anonymize"),
+  
+  T1_defaced_mri_deface = str_replace(input_nii$T1, "T1w.nii", "T1w_defaced_mri_deface.nii") %>%
+  str_replace("sourcedata", "derivatives/FSL/2-Anonymize"),
+  # T1_cropped
+  T1_cropped_defaced_fsl = str_replace(input_nii$T1_cropped, "T1w_cropped.nii", "T1w_cropped_defaced_fsl.nii") %>%
+  str_replace("1-ReorientAndCrop", "2-Anonymize"),
+  
+  T1_cropped_defaced_pydeface = str_replace(input_nii$T1_cropped, "T1w_cropped.nii", "T1w_cropped_defaced_pydeface.nii") %>%
+  str_replace("1-ReorientAndCrop", "2-Anonymize"),
+  
+  T1_cropped_defaced_mri_deface = str_replace(input_nii$T1_cropped, "T1w_cropped.nii", "T1w_cropped_defaced_mri_deface.nii") %>%
+  str_replace("1-ReorientAndCrop", "2-Anonymize"),
+  # T1_r2std
+  T1_r2std_defaced_fsl = str_replace(input_nii$T1_reorient2std, "T1w_reorient2std.nii", "T1w_reorient2std_defaced_fsl.nii") %>%
+  str_replace("1-ReorientAndCrop", "2-Anonymize"),
+    
+  T1_r2std_defaced_pydeface = str_replace(input_nii$T1_reorient2std, "T1w_reorient2std.nii", "T1w_reorient2std_defaced_pydeface.nii") %>%
+  str_replace("1-ReorientAndCrop", "2-Anonymize"), 
+  
+  T1_r2std_defaced_mri_deface = str_replace(input_nii$T1_reorient2std, "T1w_reorient2std.nii", "T1w_reorient2std_defaced_mri_deface.nii") %>%
+  str_replace("1-ReorientAndCrop", "2-Anonymize"), 
+  
+  
+  stringsAsFactors = F) 
+
+
+
+
+path_to_folder(output_nii$T1_defaced)
+
+```
+
+
+
+
+
+
+
+
+## Pydeface by Poldrack 
+
+```{r}
+# Pydeface by Poldrack
+defaceR(input = input_nii$T1,
+        output = output_nii$T1_defaced_pydeface,
+        tool = "pydeface")
+
+defaceR(input = input_nii$T1_cropped,
+       output = output_nii$T1_cropped_defaced_pydeface,
+       tool = "pydeface")
+
+defaceR(input = input_nii$T1_reorient2std,
+       output = output_nii$T1_r2std_defaced_pydeface,
+       tool = "pydeface")
+
+# MRI deface by Freesurfer
+defaceR(input = input_nii$T1,
+        output = output_nii$T1_defaced_mri_deface,
+        tool = "mri_deface")
+
+defaceR(input = input_nii$T1_cropped,
+        output = output_nii$T1_cropped_defaced_mri_deface,
+        tool = "mri_deface")
+
+defaceR(input = input_nii$T1_reorient2std,
+       output = output_nii$T1_r2std_defaced_mri_deface,
+       tool = "mri_deface")
+```
+
+```{r}
+defaceR(input = input_nii$T1_reorient2std,
+       output = output_nii$T1_r2std_defaced_fsl,
+       tool = "fsl_deface")
+
+defaceR(input = input_nii$T1_cropped,
+        output = output_nii$T1_cropped_defaced_fsl,
+        tool = "fsl_deface")
+```
+
+
+# FLAIR
+
+# Find the existing FLAIR images
+
+```{r}
+input_nii <- data.frame(FLAIR = list.files(working_dir, "FLAIR.nii.gz", recursive = TRUE, full.names = FALSE), 
+                        FLAIR_cropped = list.files(working_dir, "FLAIR_cropped.nii.gz", recursive = TRUE, full.names = FALSE),
+                        FLAIR_reorient2std = list.files(working_dir, "FLAIR_reorient2std.nii.gz", recursive = TRUE, full.names = FALSE),
+                        stringsAsFactors = F)
+
+
+```
+
+```{r}
+output_nii <- data.frame(
+  # FLAIR native
+  FLAIR_defaced_fsl = str_replace(input_nii$FLAIR, "FLAIR.nii", "FLAIR_defaced_fsl.nii")  %>%
+  str_replace("sourcedata", "derivatives/FSL/2-Anonymize"),
+  
+  FLAIR_defaced_pydeface = str_replace(input_nii$FLAIR, "FLAIR.nii", "FLAIR_defaced_pydeface.nii") %>%
+  str_replace("sourcedata", "derivatives/FSL/2-Anonymize"),
+  
+  FLAIR_defaced_mri_deface = str_replace(input_nii$FLAIR, "FLAIR.nii", "FLAIR_defaced_mri_deface.nii") %>%
+  str_replace("sourcedata", "derivatives/FSL/2-Anonymize"),
+  # FLAIR_cropped
+  FLAIR_cropped_defaced_fsl = str_replace(input_nii$FLAIR_cropped, "FLAIR_cropped.nii", "FLAIR_cropped_defaced_fsl.nii") %>%
+  str_replace("1-ReorientAndCrop", "2-Anonymize"),
+  
+  FLAIR_cropped_defaced_pydeface = str_replace(input_nii$FLAIR_cropped, "FLAIR_cropped.nii", "FLAIR_cropped_defaced_pydeface.nii") %>%
+  str_replace("1-ReorientAndCrop", "2-Anonymize"),
+  
+  FLAIR_cropped_defaced_mri_deface = str_replace(input_nii$FLAIR_cropped, "FLAIR_cropped.nii", "FLAIR_cropped_defaced_mri_deface.nii") %>%
+  str_replace("1-ReorientAndCrop", "2-Anonymize"),
+  # FLAIR_r2std
+  FLAIR_r2std_defaced_fsl = str_replace(input_nii$FLAIR_reorient2std, "FLAIR_reorient2std.nii", "FLAIR_reorient2std_defaced_fsl.nii") %>%
+  str_replace("1-ReorientAndCrop", "2-Anonymize"),
+    
+  FLAIR_r2std_defaced_pydeface = str_replace(input_nii$FLAIR_reorient2std, "FLAIR_reorient2std.nii", "FLAIR_reorient2std_defaced_pydeface.nii") %>%
+  str_replace("1-ReorientAndCrop", "2-Anonymize"), 
+  
+  FLAIR_r2std_defaced_mri_deface = str_replace(input_nii$FLAIR_reorient2std, "FLAIR_reorient2std.nii", "FLAIR_reorient2std_defaced_mri_deface.nii") %>%
+  str_replace("1-ReorientAndCrop", "2-Anonymize"), 
+  
+  
+  stringsAsFactors = F) 
+
+
+
+
+path_to_folder(output_nii$FLAIR_defaced)
+
+```
+
+
+
+## Pydeface by Poldrack 
+
+```{r}
+# Pydeface by Poldrack
+defaceR(input = input_nii$FLAIR,
+        output = output_nii$FLAIR_defaced_pydeface,
+        tool = "pydeface")
+
+defaceR(input = input_nii$FLAIR_cropped,
+       output = output_nii$FLAIR_cropped_defaced_pydeface,
+       tool = "pydeface")
+
+defaceR(input = input_nii$FLAIR_reorient2std,
+       output = output_nii$FLAIR_r2std_defaced_pydeface,
+       tool = "pydeface")
+
+# MRI deface by Freesurfer
+defaceR(input = input_nii$FLAIR,
+        output = output_nii$FLAIR_defaced_mri_deface,
+        tool = "mri_deface")
+
+defaceR(input = input_nii$FLAIR_cropped,
+        output = output_nii$FLAIR_cropped_defaced_mri_deface,
+        tool = "mri_deface")
+
+defaceR(input = input_nii$FLAIR_reorient2std,
+       output = output_nii$FLAIR_r2std_defaced_mri_deface,
+       tool = "mri_deface")
+
+# fsl_deface
+defaceR(input = input_nii$FLAIR_reorient2std,
+       output = output_nii$FLAIR_r2std_defaced_fsl,
+       tool = "fsl_deface")
+
+defaceR(input = input_nii$FLAIR_cropped,
+        output = output_nii$FLAIR_cropped_defaced_fsl,
+        tool = "fsl_deface")
+```

@@ -1,0 +1,164 @@
+---
+title: "FSLeyes"
+author: "Niklas Wulms"
+date: "10/15/2019"
+output: html_document
+---
+
+---
+title: "QualityControl"
+author: "Niklas Wulms"
+date: "10/11/2019"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+library(stringr)
+library(doParallel)
+library(foreach)
+
+
+source("qc_fsleyes.R")
+source("../tools/path_to_folder.R")
+
+knitr::opts_chunk$set(echo = TRUE)
+
+working_dir <- "/media/niklas/spaceC/WML121_BIDS"
+
+knitr::opts_knit$set(root.dir = working_dir)
+
+setwd(working_dir)
+```
+
+# Parallel setup
+
+```{r}
+
+# Calculate the number of cores
+no_cores <- detectCores() - 1
+
+# Initiate cluster
+cl <- makeCluster(no_cores, type="FORK", outfile = "")
+
+registerDoParallel(cl)
+getDoParWorkers()
+```
+
+
+# This script is for quality control of chosen images.
+
+# input images
+
+```{r}
+input_nii <- data.frame(
+  # raw input and first preprocs
+  T1 = list.files(working_dir, "T1w.nii.gz", recursive = T, full.names = F),
+  T1_reorient2std = list.files(working_dir, "T1w_reorient2std.nii.gz", recursive = T, full.names = F),
+  T1_cropped = list.files(working_dir, "T1w_cropped.nii.gz", recursive = T, full.names = F),
+  # defacing
+  T1_defaced_mri = list.files(working_dir, "T1w_defaced_mri_deface.nii.gz", recursive = T, full.names = F),
+  T1_defaced_pydeface = list.files(working_dir, "T1w_defaced_pydeface.nii.gz", recursive = T, full.names = F),
+  
+#  T1_reorient2std_defaced_mri = list.files(working_dir, "T1w_reorient2std_defaced_mri_deface.nii.gz", recursive = T, full.names = F),
+#  T1_reorient2std_defaced_pydeface = list.files(working_dir, "T1w_reorient2std_defaced_pydeface.nii.gz", recursive = T, full.names = F),
+  
+  T1_cropped_defaced_mri = list.files(working_dir, "T1w_cropped_defaced_mri_deface.nii.gz", recursive = T, full.names = F),
+  T1_cropped_defaced_pydeface = list.files(working_dir, "T1w_cropped_defaced_pydeface.nii.gz", recursive = T, full.names = F),
+  
+  # FLAIR
+  FLAIR = list.files(working_dir, "FLAIR.nii.gz", recursive = T, full.names = F),
+  FLAIR_mask = list.files(working_dir, "FLAIR_mask.nii.gz", recursive = T, full.names = F),
+  stringsAsFactors = F
+)
+
+head(input_nii)
+```
+
+# output images
+
+```{r}
+output_png <- data.frame(
+  T1 = str_replace(input_nii$T1, "sourcedata", "qualitycontrol/raw_nii") %>% str_replace("nii.gz", "jpg"),
+  FLAIR = str_replace(input_nii$FLAIR, "sourcedata", "qualitycontrol/raw_nii") %>% str_replace("nii.gz", "jpg"),
+
+  # Defacing QC files
+  T1_comp_deface_methods = str_replace(input_nii$T1, "sourcedata/sub-[:digit:]{5}/ses-S[:digit:]{1}/anat", "qualitycontrol/defacing") %>% 
+    str_replace(".nii.gz", "_comp_defacing_methods.jpg"),
+  T1_reorient2std_comp_deface_methods = str_replace(input_nii$T1_reorient2std, "derivatives/FSL/1-ReorientAndCrop/sub-[:digit:]{5}/ses-S[:digit:]{1}/anat", "qualitycontrol/defacing") %>% 
+    str_replace(".nii.gz", "_comp_defacing_methods.jpg"),
+  T1_cropped_comp_deface_methods = str_replace(input_nii$T1_cropped, "derivatives/FSL/1-ReorientAndCrop/sub-[:digit:]{5}/ses-S[:digit:]{1}/anat", "qualitycontrol/defacing") %>% 
+    str_replace(".nii.gz", "_comp_defacing_methods.jpg"),
+  
+  # manual masks
+  FLAIR_mask = str_replace(input_nii$FLAIR_mask, "sourcedata", "qualitycontrol/raw_nii") %>% str_replace("nii.gz", "jpg"), 
+  stringsAsFactors = F
+)
+
+path_to_folder(output_png$T1)
+path_to_folder(output_png$T1_comp_deface_methods)
+
+head(output_png)
+```
+
+```{r}
+qc_fsleyes(input_nii$T1, output_png$T1, tool = "T1")
+```
+
+
+## QC defacing
+
+```{r}
+qc_fsleyes_defacing(input_nii$T1[1], input_nii$T1_defaced_pydeface[1], input_nii$T1_defaced_mri[1], 
+                    output_t1 = output_png$T1_comp_deface_methods[1],
+                    slice_spacing = 6.5)
+
+# reorient2std missing      
+
+qc_fsleyes_defacing(input_nii$T1_cropped[1], input_nii$T1_cropped_defaced_pydeface[1], input_nii$T1_cropped_defaced_mri[1], 
+                    output_t1 = output_png$T1_cropped_comp_deface_methods[1],
+                    slice_spacing = 7.2)
+
+```
+
+
+
+
+
+# FSLeyes code tip -- slices to GIF
+
+this code needs a cleanup!
+
+```{r eval=FALSE}
+output_gif = str_replace(output_png$T1, ".png", ".gif")
+
+input_test <- input_nii$T1
+output_test <- str_replace(output_png$T1, ".png", "")
+
+nslices=100
+
+
+for (i in 1:nslices) {
+  output <- paste0(output_test[1], "_", i, ".png")
+  print(output)
+  command = paste0("fsleyes render -of ", output, " -xh -yh -vl 45 54 ", i, " ", input_test[1])
+  print(command)
+  system(command)
+  
+  paths_folder <- sub("[/][^/]+$", "", output)
+  system(paste0("convert -delay 13 -loop 0 ", 
+                paths_folder, "/*.png ", 
+                paths_folder, "/T1.gif"))
+}
+```
+
+
+
+
+# output images as GIF?
+```{r}
+foreach (i = 1:length(T1_biascorr_BET)) %dopar% {
+
+#  system(nii_qc_t2(T2_image[i], image_name3[i]))
+  system(paste0("convert -delay 20 -loop 0 ", image_name3[i], " ", image_name2[i], " ", image_name4[i]))
+  }
+```

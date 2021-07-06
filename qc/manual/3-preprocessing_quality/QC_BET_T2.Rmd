@@ -1,0 +1,86 @@
+---
+title: "QC_prepro_BET_T2"
+author: "Niklas Wulms"
+date: "12/4/2019"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+library(stringr)
+library(doParallel)
+library(foreach)
+library(tidyr)
+library(dplyr)
+
+source("../2-image_quality/qc_fsleyes.R")
+source("../tools/path_to_folder.R")
+
+knitr::opts_chunk$set(echo = TRUE)
+
+working_dir <- "/mnt/458e8a35-865f-4f0e-ab7e-8b4ac8684363/WML121_BIDS"
+
+knitr::opts_knit$set(root.dir = working_dir)
+
+setwd(working_dir)
+```
+
+
+```{r}
+bet_dir <- paste0(working_dir, "/derivatives/FSL/4-FSL_FLAIR_BET")
+setwd(bet_dir)
+
+fsl_bet_T2 <- data.frame(
+  #T2 = list.files(bet_dir, "nii.gz", recursive = TRUE, full.names = TRUE),
+ T2_BET = list.files(bet_dir, "T2_0.(1|2|3|4|5|6|7|8|9).nii.gz", recursive = TRUE, full.names = TRUE),
+T2_biascor_BET = list.files(bet_dir, "T2_0.(1|2|3|4|5|6|7|8|9)_biascorr.nii.gz", recursive = TRUE, full.names = TRUE),
+  stringsAsFactors = F)
+```
+
+```{r}
+qc_vertical(fsl_bet_T2$T2_BET)
+qc_vertical(fsl_bet_T2$T2_biascor_BET)
+```
+
+```{r}
+bet_dir <- paste0(working_dir, "/qualitycontrol/FSL/4-FSL_FLAIR_BET")
+setwd(bet_dir)
+
+fsl_bet_T2 <- data.frame(
+  #T2 = list.files(bet_dir, "nii.gz", recursive = TRUE, full.names = TRUE),
+ T2_BET = list.files(bet_dir, "T2_0.(1|2|3|4|5|6|7|8|9).png", recursive = TRUE, full.names = TRUE),
+T2_biascor_BET = list.files(bet_dir, "T2_0.(1|2|3|4|5|6|7|8|9)_biascorr.png", recursive = TRUE, full.names = TRUE),
+  stringsAsFactors = F) %>%
+  mutate(
+    T2_BET_fval = paste0("fval-", str_extract(T2_BET, "0\\.(1|2|3|4|5|6|7|8|9)")),
+    T2_biascor_BET_fval = paste0("fval-", str_extract(T2_biascor_BET, "0\\.(1|2|3|4|5|6|7|8|9)")),
+    T2_BET_id = str_extract(T2_BET, "sub-[:digit:]{5}/ses-S[:digit:]{1}"),
+    T2_biascor_BET_id = str_extract(T2_biascor_BET, "sub-[:digit:]{5}/ses-S[:digit:]{1}")
+
+) 
+
+ fsl_bet_T2_orig  <-  fsl_bet_T2 %>%
+  select(contains("T2_BET")) %>%
+  spread(T2_BET_fval, T2_BET) %>%
+   mutate(output = str_replace(`fval-0.1`, "/sub", "/collage/sub") %>% str_replace("/ses-S", "_ses-S"))
+ 
+ fsl_bet_T2_biascorr <- fsl_bet_T2 %>%
+  select(contains("T2_biascor_BET")) %>%
+  spread(T2_biascor_BET_fval, T2_biascor_BET) %>%
+   mutate(output = str_replace(`fval-0.1`, "/sub", "/collage/sub") %>% str_replace("/ses-S", "_ses-S"))
+
+```
+
+```{r}
+path_to_folder(fsl_bet_T2_orig$output)
+
+collage_nine_vertical(fsl_bet_T2_orig$`fval-0.1`, fsl_bet_T2_orig$`fval-0.2`, fsl_bet_T2_orig$`fval-0.3`,
+                      fsl_bet_T2_orig$`fval-0.4`, fsl_bet_T2_orig$`fval-0.5`, fsl_bet_T2_orig$`fval-0.6`,
+                      fsl_bet_T2_orig$`fval-0.7`, fsl_bet_T2_orig$`fval-0.8`, fsl_bet_T2_orig$`fval-0.9`,
+                      fsl_bet_T2_orig$output)
+
+collage_nine_vertical(fsl_bet_T2_biascorr$`fval-0.1`, fsl_bet_T2_biascorr$`fval-0.2`, fsl_bet_T2_biascorr$`fval-0.3`,
+                      fsl_bet_T2_biascorr$`fval-0.4`, fsl_bet_T2_biascorr$`fval-0.5`, fsl_bet_T2_biascorr$`fval-0.6`,
+                      fsl_bet_T2_biascorr$`fval-0.7`, fsl_bet_T2_biascorr$`fval-0.8`, fsl_bet_T2_biascorr$`fval-0.9`,
+                      fsl_bet_T2_biascorr$output)
+```
+

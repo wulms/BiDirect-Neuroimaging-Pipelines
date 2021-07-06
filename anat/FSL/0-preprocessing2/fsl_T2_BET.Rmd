@@ -1,0 +1,77 @@
+---
+title: "BET_T2_images"
+author: "Niklas Wulms"
+date: "11/29/2019"
+output: html_document
+---
+
+
+# Here we decide to use BET on the T2 images
+- pydefaced images (fsl_deface removes to much relevant tissue in T2 images)
+  - we use the raw version, because reorient2std and cropping does not seem to affect performance
+  - we use the raw version (good, then no further preprocessing of T2 is needed)
+  - and also the bias_corrected_image (gained through fsl_anat t2 pipeline)
+- mri_deface does not work on T2
+
+```{r setup, include=FALSE}
+library(stringr)
+library(doParallel)
+library(foreach)
+library(tidyr)
+library(dplyr)
+
+
+source("fsl_BET_T2.R")
+
+source("../../tools/path_to_folder.R")
+
+knitr::opts_chunk$set(echo = TRUE)
+
+working_dir <- "/mnt/458e8a35-865f-4f0e-ab7e-8b4ac8684363/WML121_BIDS/derivatives/FSL"
+
+knitr::opts_knit$set(root.dir = working_dir)
+
+setwd(working_dir)
+```
+
+# Parallel setup
+
+```{r}
+
+# Calculate the number of cores
+no_cores <- detectCores() - 1
+
+# Initiate cluster
+cl <- makeCluster(no_cores, type="FORK", outfile = "")
+
+registerDoParallel(cl)
+getDoParWorkers()
+```
+
+## Selection of the most disturbed patient preprocessings (seen above)
+
+patient 30060, 30071, 30135, 30067
+
+```{r}
+derivatives_dir <- "/mnt/458e8a35-865f-4f0e-ab7e-8b4ac8684363/WML121_BIDS/derivatives/FSL/3-FSL_pipeline/anat_FLAIR_defaced_pydeface/"
+
+fsl_anat_nii_selection_t2 <- data.frame(
+  # raw input and first preprocs
+  T2_biascorr = list.files(derivatives_dir, "T2_biascorr.nii.gz", recursive = TRUE, full.names = TRUE),
+  T2 = list.files(derivatives_dir, "T2.nii.gz", recursive = TRUE, full.names = TRUE),
+  stringsAsFactors = F)             
+
+fsl_anat_nii_selection_t2  
+```
+
+```{r}
+fsl_bet(fsl_anat_nii_selection_t2$T2_biascorr,
+        fval=seq(0.1, 0.9, 0.1))
+
+fsl_bet(fsl_anat_nii_selection_t2$T2,
+        fval=seq(0.1, 0.9, 0.1))
+
+```
+
+
+

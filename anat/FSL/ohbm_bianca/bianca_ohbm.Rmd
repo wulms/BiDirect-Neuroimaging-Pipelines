@@ -1,0 +1,160 @@
+---
+title: "fsl_BIANCA_ohbm_script"
+author: "Niklas Wulms"
+date: "12/29/2019"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(forcats)
+merged_LOO_expand <- merged_LOO_expand %>%
+  ungroup() %>%
+  mutate(SI = str_extract(performance_string,"(?<=SI )(0|[:digit:]*.[:digit:]*)") %>% as.numeric(),
+         FDR = str_extract(performance_string,"(?<=FDR )(0|[:digit:]*.[:digit:]*)") %>% as.numeric(),
+         FNR = str_extract(performance_string,"(?<=FNR )(0|[:digit:]*.[:digit:]*)") %>% as.numeric(),
+         FDR_clusters = str_extract(performance_string,"(?<=FDR_clusters )(0|[:digit:]*.[:digit:]*)") %>% as.numeric(),
+         FNR_clusters = str_extract(performance_string,"(?<=FNR_clusters )(0|[:digit:]*.[:digit:]*)") %>% as.numeric(),
+         DER = str_extract(performance_string,"(?<=DER )(0|[:digit:]*.[:digit:]*)") %>% as.numeric(),
+         OER = str_extract(performance_string,"(?<=OER )(0|[:digit:]*.[:digit:]*)") %>% as.numeric(),
+         MTA = str_extract(performance_string,"(?<=MTA )(0|[:digit:]*.[:digit:]*)") %>% as.numeric(),
+         LESION_vol = str_extract(performance_string,"(?<=LESION_vol )(0|[:digit:]*.[:digit:]*)") %>% as.numeric(),
+         MANUAL_vol = str_extract(performance_string,"(?<=MANUAL_vol )(0|[:digit:]*.[:digit:]*)") %>% as.numeric(),
+         VOLUME_diff = LESION_vol - MANUAL_vol,
+         VOLUME_mean = (LESION_vol + MANUAL_vol) / 2,
+         thresh = as.factor(thresh),
+         model = fct_relevel(model, c("model_LOO_S0_80", "model_LOO_S4_80", "model_LOO_S4_121", "model_LOO_S0_S4_160", "model_LOO_S0_S4_201")))
+
+merged_LOO_expand
+```
+
+
+```{r}
+
+merged_long <- merged_LOO_expand %>% gather( "metric", "value", SI:VOLUME_mean)
+
+merged_long %>% filter(is.na(value)) %>% group_by(metric) %>% count()
+```
+
+# Overview
+```{r fig.width = 20, fig.height = 15}
+library(ggplot2)
+
+ggplot(merged_long, aes(x = thresh, y = value)) +
+  geom_boxplot(na.rm = FALSE) +
+  facet_grid(metric ~ model, scales = "free_y")
+```
+
+# Bland-Altman Plots
+
+```{r fig.width = 20, fig.height = 15}
+merged_LOO_expand_mean <- merged_LOO_expand %>% 
+  group_by(thresh, model) %>%
+  summarise(mean_vol = mean(VOLUME_diff),
+            sd_vol = sd(VOLUME_diff)) %>% 
+  select(thresh, model, mean_vol, sd_vol) %>%
+  ungroup()
+merged_LOO_expand_mean
+
+ggplot(merged_LOO_expand, aes(x = VOLUME_mean, y = VOLUME_diff)) +
+  geom_point(alpha = 0.25) + 
+    facet_grid(thresh ~ model, scales = "free_x") +
+  geom_hline(data=merged_LOO_expand_mean, aes(yintercept = mean_vol), colour = "blue", size = 0.5) +
+  geom_hline(data=merged_LOO_expand_mean, aes(yintercept = (mean_vol - (1.96 * sd_vol))), colour = "red", size = 0.5) +
+  geom_hline(data=merged_LOO_expand_mean, aes(yintercept = (mean_vol + (1.96 * sd_vol))), colour = "red", size = 0.5) +
+  xlab("Average Volume") +
+  ylab("Diff. Between Methods")
+
+ggplot(merged_LOO_expand, aes(x = VOLUME_mean, y = VOLUME_diff)) +
+  geom_point(alpha = 0.25) + 
+    facet_grid(thresh ~ model, scales = "free") +
+  geom_hline(data=merged_LOO_expand_mean, aes(yintercept = mean_vol), colour = "blue", size = 0.5) +
+  geom_hline(data=merged_LOO_expand_mean, aes(yintercept = (mean_vol - (1.96 * sd_vol))), colour = "red", size = 0.5) +
+  geom_hline(data=merged_LOO_expand_mean, aes(yintercept = (mean_vol + (1.96 * sd_vol))), colour = "red", size = 0.5) +
+  xlab("Average Volume") +
+  ylab("Diff. Between Methods")
+
+```
+
+
+## Selected Diagrams OHBM
+
+```{r fig.width = 15, fig.height = 15}
+library(patchwork)
+library(ggthemes)
+library(ggplot2)
+dice_figure <- merged_long %>%
+  filter(metric %in% c("SI")) %>%
+  filter(model %in% c("model_LOO_S0_80"))%>%
+ggplot(aes(x = thresh, y = value)) +
+  geom_boxplot(na.rm = FALSE) +
+  facet_grid(metric ~ model, scales = "free_y") +
+  xlab("Threshold") +
+  ylab("Dice Coefficient") +
+  ggtitle("Dice Coefficients of the 5 trained models (BIANCA LOO Validation)")+
+  theme_light()
+
+diff_vol_figure <- merged_long %>%
+  filter(model %in% c("model_LOO_S0_80"))%>%
+  filter(metric %in% c("VOLUME_diff")) %>%
+ggplot(aes(x = thresh, y = value)) +
+  geom_boxplot(na.rm = FALSE) +
+  facet_grid(metric ~ model, scales = "free_y") +
+  xlab("Threshold") +
+  ylab("Volume Difference in mm³") +
+  ggtitle("Volume Difference (manual mask - BIANCA mask) of the 5 trained models (BIANCA LOO Validation)")+
+  theme_light()
+
+dice_figure / diff_vol_figure
+
+merged_LOO_expand_mean <- merged_LOO_expand_mean %>%
+  filter(model %in% c("model_LOO_S0_80"))
+
+
+bland_alt <- merged_LOO_expand %>%
+  filter(model %in% c("model_LOO_S0_80")) %>%
+  ggplot(aes(x = VOLUME_mean, y = VOLUME_diff)) +
+  geom_point(alpha = 0.25) + 
+    facet_grid(thresh ~ model, scales = "free_x") +
+  geom_hline(data=merged_LOO_expand_mean, aes(yintercept = mean_vol), colour = "blue", size = 0.5) +
+  geom_hline(data=merged_LOO_expand_mean, aes(yintercept = (mean_vol - (1.96 * sd_vol))), colour = "red", size = 0.5) +
+  geom_hline(data=merged_LOO_expand_mean, aes(yintercept = (mean_vol + (1.96 * sd_vol))), colour = "red", size = 0.5) +
+  xlab("Average Volume") +
+  ylab("Volume Difference Between Methods")+
+  ggtitle("Bland-Altman Plots - fixed scale: manual vs BIANCA mask at different thresholds")+
+  theme_light()
+
+bland_alt_free <- merged_LOO_expand %>%
+  filter(model %in% c("model_LOO_S0_80")) %>%
+  ggplot(aes(x = VOLUME_mean, y = VOLUME_diff)) +
+  geom_point(alpha = 0.25) + 
+    facet_grid(thresh ~ model, scales = "free") +
+  geom_hline(data=merged_LOO_expand_mean, aes(yintercept = mean_vol), colour = "blue", size = 0.5) +
+  geom_hline(data=merged_LOO_expand_mean, aes(yintercept = (mean_vol - (1.96 * sd_vol))), colour = "red", size = 0.5) +
+  geom_hline(data=merged_LOO_expand_mean, aes(yintercept = (mean_vol + (1.96 * sd_vol))), colour = "red", size = 0.5) +
+  xlab("Average Volume") +
+  ylab("Volume Difference Between Methods")+
+  ggtitle("Bland-Altman Plots - free y scale: manual vs BIANCA mask at different thresholds")+
+  theme_light()
+
+bland_alt | bland_alt_free
+```
+
+```{r result='asis'}
+library(knitr)
+
+table_1 <- merged_LOO_expand %>%
+  filter(model %in% c("model_LOO_S0_80")) %>%
+  group_by(model, thresh) %>%
+  select(SI, VOLUME_diff) %>%
+  summarise(N = n(),
+            Dice_mean = mean(SI, na.rm = TRUE),
+            Dice_sd = sd(SI, na.rm = TRUE),
+            Volume_difference_mean = mean(VOLUME_diff, na.rm = TRUE),
+            Volume_difference_sd = sd(VOLUME_diff, na.rm = TRUE))
+
+kable(table_1)
+```

@@ -1,0 +1,164 @@
+---
+title: "QC_prepro_BET_T2"
+author: "Niklas Wulms"
+date: "12/4/2019"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+library(stringr)
+library(doParallel)
+library(foreach)
+library(tidyr)
+library(dplyr)
+
+source("../2-image_quality/qc_fsleyes.R")
+source("../tools/path_to_folder.R")
+
+knitr::opts_chunk$set(echo = TRUE)
+
+working_dir <- "/mnt/458e8a35-865f-4f0e-ab7e-8b4ac8684363/WML121_BIDS"
+
+knitr::opts_knit$set(root.dir = working_dir)
+
+setwd(working_dir)
+```
+
+
+```{r}
+nii_files <- data.frame(
+  # raw input and first preprocs
+  FLAIR_BET = list.files("/mnt/458e8a35-865f-4f0e-ab7e-8b4ac8684363/WML121_BIDS/derivatives/FSL/5-FSL_FLIRT/anat_FLAIR_defaced_pydeface/",
+                                             "T2_masked_0\\.(0|4)_biascorr_(fsl|py)deface_(06|12)_inverse.nii.gz", recursive = TRUE, full.names = TRUE),
+  T1_BET_to_FLAIR = list.files("/mnt/458e8a35-865f-4f0e-ab7e-8b4ac8684363/WML121_BIDS/derivatives/FSL/5-FSL_FLIRT/anat_FLAIR_defaced_pydeface/",
+                                                  "T1_0\\.(0|4)_biascorr_(fsl|py)deface_(06|12)_inverse.nii.gz", recursive = TRUE, full.names = TRUE),
+  stringsAsFactors = F)             
+
+
+
+dir.create("6-BIANCA")
+```
+
+
+```{r}
+fsldeface_06 <- nii_files %>%
+  filter(str_detect(FLAIR_BET, "fsldeface_06") == 1) %>%
+  mutate(mask  = list.files("/mnt/458e8a35-865f-4f0e-ab7e-8b4ac8684363/WML121_BIDS/derivatives/FSL/5-FSL_FLIRT/manual/",
+                                "mask_T2_space.nii.gz", recursive = TRUE, full.names = TRUE),
+         output = str_replace(FLAIR_BET, "/5-FSL_FLIRT/anat_FLAIR_defaced_pydeface/", "/6-BIANCA/") %>%
+           str_replace("_inverse", "_inverse_BIANCA_mask"))
+
+
+fsldeface_12 <- nii_files %>%
+  filter(str_detect(FLAIR_BET, "fsldeface_12") == 1) %>%
+  mutate(mask  = list.files("/mnt/458e8a35-865f-4f0e-ab7e-8b4ac8684363/WML121_BIDS/derivatives/FSL/5-FSL_FLIRT/manual/",
+                                "mask_T2_space.nii.gz", recursive = TRUE, full.names = TRUE),
+         output = str_replace(FLAIR_BET, "/5-FSL_FLIRT/anat_FLAIR_defaced_pydeface/", "/6-BIANCA/") %>%
+           str_replace("_inverse", "_inverse_BIANCA_mask"))
+
+
+pydeface_06 <- nii_files %>%
+  filter(str_detect(FLAIR_BET, "pydeface_06") == 1) %>%
+  mutate(mask  = list.files("/mnt/458e8a35-865f-4f0e-ab7e-8b4ac8684363/WML121_BIDS/derivatives/FSL/5-FSL_FLIRT/manual/", 
+                                "mask_T2_space.nii.gz", recursive = TRUE, full.names = TRUE),
+         output = str_replace(FLAIR_BET, "/5-FSL_FLIRT/anat_FLAIR_defaced_pydeface/", "/6-BIANCA/") %>%
+           str_replace("_inverse", "_inverse_BIANCA_mask"),
+         id = str_extract(output, "sub-[:digit:]{5}") %>% str_extract("[:digit:]{5}"),
+         ses = str_extract(output, "ses-S[:digit:]{1}")) 
+
+
+pydeface_12 <- nii_files %>%
+  filter(str_detect(FLAIR_BET, "pydeface_12") == 1) %>%
+  mutate(mask  = list.files("/mnt/458e8a35-865f-4f0e-ab7e-8b4ac8684363/WML121_BIDS/derivatives/FSL/5-FSL_FLIRT/manual/",
+                                "mask_T2_space.nii.gz", recursive = TRUE, full.names = TRUE),
+         output = str_replace(FLAIR_BET, "/5-FSL_FLIRT/anat_FLAIR_defaced_pydeface/", "/6-BIANCA/") %>%
+           str_replace("_inverse", "_inverse_BIANCA_mask"))
+
+```
+
+```{r}
+qc_vertical_masks(pydeface_06$FLAIR_BET, pydeface_06$mask)
+qc_vertical_masks(pydeface_12$FLAIR_BET, pydeface_12$mask)
+qc_vertical_masks(fsldeface_06$FLAIR_BET, fsldeface_06$mask)
+qc_vertical_masks(fsldeface_12$FLAIR_BET, fsldeface_12$mask)
+
+```
+
+```{r}
+img_dir <- "/mnt/458e8a35-865f-4f0e-ab7e-8b4ac8684363/WML121_BIDS/qualitycontrol/FSL/5-FSL_FLIRT/"
+output_dir = paste0("/mnt/458e8a35-865f-4f0e-ab7e-8b4ac8684363/WML121_BIDS/qualitycontrol/FSL/5-FSL_FLIRT/collage/")
+
+FLAIR_mask_images <- list.files(img_dir, "png", recursive = TRUE, full.names = TRUE)
+
+FLAIR <- data.frame(FLAIR = FLAIR_mask_images,
+                    stringsAsFactors = FALSE) %>%
+  mutate(sub = str_extract(FLAIR, "sub-[:digit:]{5}"),
+         survey = str_extract(FLAIR, "ses-S(0|4)"),
+         affine = str_extract(FLAIR, "(fsl|py)deface_(06|12)"),
+         ses_affine = paste0(affine, "_", survey)) %>%
+  select(-survey, -affine) %>%
+  spread(ses_affine, FLAIR) %>%
+  mutate(output = paste0(output_dir, sub, "_FLAIR-mask.png"))
+
+#FLAIR = FLAIR[1,]
+```
+
+```{r}
+collage_eight_horizontal(FLAIR$`fsldeface_06_ses-S0`, FLAIR$`fsldeface_12_ses-S0`, FLAIR$`pydeface_06_ses-S0`, FLAIR$`pydeface_12_ses-S0`,
+                         FLAIR$`fsldeface_06_ses-S4`, FLAIR$`fsldeface_12_ses-S4`, FLAIR$`pydeface_06_ses-S4`, FLAIR$`pydeface_12_ses-S4`,
+                        output_name = FLAIR$output)
+```
+
+
+
+
+
+
+```{r}
+qc_vertical(fsl_bet_T2$T2_BET)
+qc_vertical(fsl_bet_T2$T2_biascor_BET)
+```
+
+```{r}
+bet_dir <- paste0(working_dir, "/qualitycontrol/FSL/4-FSL_FLAIR_BET")
+setwd(bet_dir)
+
+fsl_bet_T2 <- data.frame(
+  #T2 = list.files(bet_dir, "nii.gz", recursive = TRUE, full.names = TRUE),
+ T2_BET = list.files(bet_dir, "T2_0.(1|2|3|4|5|6|7|8|9).png", recursive = TRUE, full.names = TRUE),
+T2_biascor_BET = list.files(bet_dir, "T2_0.(1|2|3|4|5|6|7|8|9)_biascorr.png", recursive = TRUE, full.names = TRUE),
+  stringsAsFactors = F) %>%
+  mutate(
+    T2_BET_fval = paste0("fval-", str_extract(T2_BET, "0\\.(1|2|3|4|5|6|7|8|9)")),
+    T2_biascor_BET_fval = paste0("fval-", str_extract(T2_biascor_BET, "0\\.(1|2|3|4|5|6|7|8|9)")),
+    T2_BET_id = str_extract(T2_BET, "sub-[:digit:]{5}/ses-S[:digit:]{1}"),
+    T2_biascor_BET_id = str_extract(T2_biascor_BET, "sub-[:digit:]{5}/ses-S[:digit:]{1}")
+
+) 
+
+ fsl_bet_T2_orig  <-  fsl_bet_T2 %>%
+  select(contains("T2_BET")) %>%
+  spread(T2_BET_fval, T2_BET) %>%
+   mutate(output = str_replace(`fval-0.1`, "/sub", "/collage/sub") %>% str_replace("/ses-S", "_ses-S"))
+ 
+ fsl_bet_T2_biascorr <- fsl_bet_T2 %>%
+  select(contains("T2_biascor_BET")) %>%
+  spread(T2_biascor_BET_fval, T2_biascor_BET) %>%
+   mutate(output = str_replace(`fval-0.1`, "/sub", "/collage/sub") %>% str_replace("/ses-S", "_ses-S"))
+
+```
+
+```{r}
+path_to_folder(fsl_bet_T2_orig$output)
+
+collage_nine_vertical(fsl_bet_T2_orig$`fval-0.1`, fsl_bet_T2_orig$`fval-0.2`, fsl_bet_T2_orig$`fval-0.3`,
+                      fsl_bet_T2_orig$`fval-0.4`, fsl_bet_T2_orig$`fval-0.5`, fsl_bet_T2_orig$`fval-0.6`,
+                      fsl_bet_T2_orig$`fval-0.7`, fsl_bet_T2_orig$`fval-0.8`, fsl_bet_T2_orig$`fval-0.9`,
+                      fsl_bet_T2_orig$output)
+
+collage_nine_vertical(fsl_bet_T2_biascorr$`fval-0.1`, fsl_bet_T2_biascorr$`fval-0.2`, fsl_bet_T2_biascorr$`fval-0.3`,
+                      fsl_bet_T2_biascorr$`fval-0.4`, fsl_bet_T2_biascorr$`fval-0.5`, fsl_bet_T2_biascorr$`fval-0.6`,
+                      fsl_bet_T2_biascorr$`fval-0.7`, fsl_bet_T2_biascorr$`fval-0.8`, fsl_bet_T2_biascorr$`fval-0.9`,
+                      fsl_bet_T2_biascorr$output)
+```
+

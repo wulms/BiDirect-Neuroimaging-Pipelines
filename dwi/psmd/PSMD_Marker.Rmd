@@ -1,0 +1,95 @@
+---
+title: "PSMD_Marker"
+author: "Niklas Wulms"
+date: "10/17/2019"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+library(stringr)
+library(tictoc)
+library(doParallel)
+library(foreach)
+
+source("../tools/path_to_folder.R")
+source("psmd.R")
+
+knitr::opts_chunk$set(echo = TRUE)
+
+working_dir <- "/media/niklas/Vierer/BIDS/sourcedata_dwi"
+knitr::opts_knit$set(root.dir = working_dir)
+
+setwd(working_dir)
+```
+
+# Set up parallel computing
+
+```{r}
+
+# Calculate the number of cores
+no_cores <- detectCores() - 1
+
+# Initiate cluster
+cl <- makeCluster(no_cores, type="FORK", outfile = "")
+
+registerDoParallel(cl)
+getDoParWorkers()
+```
+
+# Find the existing dwi images, bvals and bvecs
+
+30566 session 2 is duplicate
+
+```{r}
+dwi = list.files(working_dir, "dwi", recursive = TRUE, full.names = TRUE)
+
+dwi_nii = str_replace(dwi, ".nii.gz|.json|.bval|.bvec", "") %>% tibble()
+head(dwi_nii)
+
+library(dplyr)
+dwi_nii %>% group_by_all %>% count() %>% filter(n < 4)
+
+
+```
+
+
+```{r}
+input_nii <- data.frame(dwi = list.files(working_dir, "dwi.nii.gz", recursive = TRUE, full.names = TRUE),
+                        dwi_bvals = list.files(working_dir, "dwi.bval", recursive = TRUE, full.names = TRUE),
+                        dwi_bvecs = list.files(working_dir, "dwi.bvec", recursive = TRUE, full.names = TRUE),
+                        skeleton_mask = "/home/niklas/Downloads/installer/psmd/psmd/skeleton_mask.nii.gz",
+                        stringsAsFactors = F)
+
+# output_nii <- data.frame(dwi = str_replace(input_nii$dwi, working_dir, "/media/niklas/Vierer/BIDS/sourcedata_dwi"),
+#                          dwi_bvals = str_replace(input_nii$dwi_bvals, working_dir, "/media/niklas/Vierer/BIDS/sourcedata_dwi"),
+#                          dwi_bvecs = str_replace(input_nii$dwi_bvecs, working_dir, "/media/niklas/Vierer/BIDS/sourcedata_dwi"),
+#                          stringsAsFactors = F)
+
+
+input_nii$subject_path <- sub("[/][^/]+$", "", input_nii$dwi) %>% str_replace("dwi", "dwi/")
+input_nii$dwi <- str_replace(input_nii$dwi, input_nii$subject_path, "")
+input_nii$dwi_bvals <- str_replace(input_nii$dwi_bvals, input_nii$subject_path, "")
+input_nii$dwi_bvecs <- str_replace(input_nii$dwi_bvecs, input_nii$subject_path, "")
+```
+
+# transfer files to another folder
+
+```{r eval=FALSE}
+
+path_to_folder(output_nii$dwi)
+
+
+file.copy(input_nii$dwi, output_nii$dwi)
+file.copy(input_nii$dwi_bvals, output_nii$dwi_bvals)
+file.copy(input_nii$dwi_bvecs, output_nii$dwi_bvecs)
+```
+
+
+# Run on written parallel loop
+
+```{r}
+
+
+psmd(input_nii$dwi, input_nii$dwi_bvals, input_nii$dwi_bvecs, input_nii$subject_path, input_nii$skeleton_mask)
+```
+

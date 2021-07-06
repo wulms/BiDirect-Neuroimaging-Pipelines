@@ -1,0 +1,348 @@
+---
+title: "extract_ROI_information_FA_MD"
+author: "Niklas Wulms"
+date: "10/21/2019"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+library(stringr)
+library(tictoc)
+library(doParallel)
+library(foreach)
+
+source("../tools/path_to_folder.R")
+
+
+knitr::opts_chunk$set(echo = TRUE)
+
+working_dir <- "/media/niklas/spaceC/WML121_BIDS_2/"
+knitr::opts_knit$set(root.dir = working_dir)
+
+setwd(working_dir)
+```
+
+# Set up parallel computing
+
+```{r}
+
+# Calculate the number of cores
+no_cores <- detectCores() - 1
+
+# Initiate cluster
+cl <- makeCluster(no_cores, type="FORK", outfile = "")
+
+registerDoParallel(cl)
+getDoParWorkers()
+```
+
+
+# Find the existing FA / MD images, skeletonized too
+
+```{r}
+# error in naming files during processing in PSMD (FA named, right name is MD)
+
+MD_native = list.files(working_dir, "temp-DTI_FA.nii.gz", recursive = TRUE, full.names = TRUE)  %>% str_replace("//", "/")
+MD_native = MD_native[str_detect(MD_native, "MD")]
+
+
+input_nii <- data.frame(FA_native = list.files(working_dir, "temp-DTI_FA_FA.nii.gz", recursive = TRUE, full.names = TRUE) %>% str_replace("//", "/"),
+                        MD_native = MD_native,
+                        
+                        PSMD_txt = list.files(working_dir, "psmd.txt", recursive = TRUE, full.names = TRUE) %>% str_replace("//", "/"),
+                        
+                        FA_MNI152 = list.files(working_dir, "all_FA.nii.gz", recursive = TRUE, full.names = TRUE) %>% str_replace("//", "/"),
+                        MD_MNI152 = list.files(working_dir, "all_MD.nii.gz", recursive = TRUE, full.names = TRUE) %>% str_replace("//", "/"),
+                        
+                        FA_skeleton = list.files(working_dir, "FA_skeletonised.nii.gz", recursive = TRUE, full.names = TRUE) %>% str_replace("//", "/"),
+                        MD_skeleton = list.files(working_dir, "MD_skeletonised.nii.gz", recursive = TRUE, full.names = TRUE) %>% str_replace("//", "/"),
+                        
+                        # templates
+                        FA_skeleton_mask = "/home/niklas/MATLAB_Neuroimaging/template/fsl/mean_FA_skeleton_mask.nii.gz",
+                        FA_mean_mask = "/home/niklas/MATLAB_Neuroimaging/template/fsl/mean_FA_mask.nii.gz",
+                        MNI_WM_mask_25 = "/home/niklas/MATLAB_Neuroimaging/template/fsl/avg152T1_white_1mm_bin_25.nii.gz",
+                        MNI_WM_mask_50 = "/home/niklas/MATLAB_Neuroimaging/template/fsl/avg152T1_white_1mm_bin_50.nii.gz",
+                        MNI_WM_mask_75 = "/home/niklas/MATLAB_Neuroimaging/template/fsl/avg152T1_white_1mm_bin_75.nii.gz",
+                        MNI_WM_mask_100 = "/home/niklas/MATLAB_Neuroimaging/template/fsl/avg152T1_white_1mm_bin_100.nii.gz",
+                        
+                        # region atlas
+                        MNI_atlas = "/usr/local/fsl/data/atlases/MNI/MNI-maxprob-thr0-1mm.nii.gz",
+                        
+                        subject = str_extract(MD_native, "[:digit:]{5}"), 
+                        session = str_extract(MD_native, "ses-[:digit:]{1}"),
+
+                        stringsAsFactors = F)
+
+input_nii$subject_path <- sub("[/][^/]+$", "", input_nii$PSMD_txt)
+
+
+
+input_nii
+
+```
+
+```{r}
+output_nii <- data.frame(subject_session = paste0(input_nii$subject, "_", input_nii$session))
+
+
+```
+
+
+```{r}
+source("extractROImean.R")
+```
+
+# Skeleton mask (applying TBSS skeleton) and ROI overlap
+```{r}
+extract_ROI_mean(input_nii$FA_MNI152, 
+                 input_nii$FA_skeleton_mask, 
+                 input_nii$MNI_atlas, 
+                 input_nii$subject_path,
+                 "3",
+                 "MNI152_skeleton_mask_Frontal")
+
+extract_ROI_mean(input_nii$FA_MNI152, 
+                 input_nii$FA_skeleton_mask, 
+                 input_nii$MNI_atlas, 
+                 input_nii$subject_path,
+                 "5",
+                 "MNI152_skeleton_mask_Occipital")
+
+extract_ROI_mean(input_nii$FA_MNI152, 
+                 input_nii$FA_skeleton_mask, 
+                 input_nii$MNI_atlas, 
+                 input_nii$subject_path,
+                 "6",
+                 "MNI152_skeleton_mask_Parietal")
+
+extract_ROI_mean(input_nii$FA_MNI152, 
+                 input_nii$FA_skeleton_mask, 
+                 input_nii$MNI_atlas, 
+                 input_nii$subject_path,
+                 "8",
+                 "MNI152_skeleton_mask_Temporal")
+
+
+```
+
+# Mean Mask (applying Brain mask of FA processing) - like FULL brain
+
+```{r}
+
+extract_ROI_mean(input_nii$FA_MNI152, 
+                 input_nii$FA_mean_mask, 
+                 input_nii$MNI_atlas, 
+                 input_nii$subject_path,
+                 "3",
+                 "MNI152_FA_mean_mask_Frontal")
+
+extract_ROI_mean(input_nii$FA_MNI152, 
+                 input_nii$FA_mean_mask, 
+                 input_nii$MNI_atlas, 
+                 input_nii$subject_path,
+                 "5",
+                 "MNI152_FA_mean_mask_Occipital")
+
+extract_ROI_mean(input_nii$FA_MNI152, 
+                 input_nii$FA_mean_mask, 
+                 input_nii$MNI_atlas, 
+                 input_nii$subject_path,
+                 "6",
+                 "MNI152_FA_mean_mask_Parietal")
+
+extract_ROI_mean(input_nii$FA_MNI152, 
+                 input_nii$FA_mean_mask, 
+                 input_nii$MNI_atlas, 
+                 input_nii$subject_path,
+                 "8",
+                 "MNI152_FA_mean_mask_Temporal")
+
+
+```
+
+# MNI WM Mask (applying Brain mask of MNI152 template (fsl))
+
+the wm image was converted to 1mm resolution, then thresholded at 25, 50, 75, 100
+
+(1) the selected ROI will be written out
+(2) the ROI will be edited with another mask
+  - whole-brain, 
+  - wm (different thresholds)
+  - skeleton
+(3) this new mask will be applied to the image
+
+```{r}
+
+extract_ROI_mean(input_nii$FA_MNI152, 
+                 input_nii$MNI_WM_mask_25, 
+                 input_nii$MNI_atlas, 
+                 input_nii$subject_path,
+                 "3",
+                 "MNI152_wm_mask_25_Frontal")
+
+extract_ROI_mean(input_nii$FA_MNI152, 
+                 input_nii$MNI_WM_mask_25, 
+                 input_nii$MNI_atlas, 
+                 input_nii$subject_path,
+                 "5",
+                 "MNI152_wm_mask_25_Occipital")
+
+extract_ROI_mean(input_nii$FA_MNI152, 
+                 input_nii$MNI_WM_mask_25, 
+                 input_nii$MNI_atlas, 
+                 input_nii$subject_path,
+                 "6",
+                 "MNI152_wm_mask_25_Parietal")
+
+extract_ROI_mean(input_nii$FA_MNI152, 
+                 input_nii$MNI_WM_mask_25, 
+                 input_nii$MNI_atlas, 
+                 input_nii$subject_path,
+                 "8",
+                 "MNI152_wm_mask_25_Temporal")
+
+#####
+
+extract_ROI_mean(input_nii$FA_MNI152, 
+                 input_nii$MNI_WM_mask_50, 
+                 input_nii$MNI_atlas, 
+                 input_nii$subject_path,
+                 "3",
+                 "MNI152_wm_mask_50_Frontal")
+
+extract_ROI_mean(input_nii$FA_MNI152, 
+                 input_nii$MNI_WM_mask_50, 
+                 input_nii$MNI_atlas, 
+                 input_nii$subject_path,
+                 "5",
+                 "MNI152_wm_mask_50_Occipital")
+
+extract_ROI_mean(input_nii$FA_MNI152, 
+                 input_nii$MNI_WM_mask_50, 
+                 input_nii$MNI_atlas, 
+                 input_nii$subject_path,
+                 "6",
+                 "MNI152_wm_mask_50_Parietal")
+
+extract_ROI_mean(input_nii$FA_MNI152, 
+                 input_nii$MNI_WM_mask_50, 
+                 input_nii$MNI_atlas, 
+                 input_nii$subject_path,
+                 "8",
+                 "MNI152_wm_mask_50_Temporal")
+
+####
+
+extract_ROI_mean(input_nii$FA_MNI152, 
+                 input_nii$MNI_WM_mask_75, 
+                 input_nii$MNI_atlas, 
+                 input_nii$subject_path,
+                 "3",
+                 "MNI152_wm_mask_75_Frontal")
+
+extract_ROI_mean(input_nii$FA_MNI152, 
+                 input_nii$MNI_WM_mask_75, 
+                 input_nii$MNI_atlas, 
+                 input_nii$subject_path,
+                 "5",
+                 "MNI152_wm_mask_75_Occipital")
+
+extract_ROI_mean(input_nii$FA_MNI152, 
+                 input_nii$MNI_WM_mask_75, 
+                 input_nii$MNI_atlas, 
+                 input_nii$subject_path,
+                 "6",
+                 "MNI152_wm_mask_75_Parietal")
+
+extract_ROI_mean(input_nii$FA_MNI152, 
+                 input_nii$MNI_WM_mask_75, 
+                 input_nii$MNI_atlas, 
+                 input_nii$subject_path,
+                 "8",
+                 "MNI152_wm_mask_75_Temporal")
+
+####
+
+extract_ROI_mean(input_nii$FA_MNI152, 
+                 input_nii$MNI_WM_mask_100, 
+                 input_nii$MNI_atlas, 
+                 input_nii$subject_path,
+                 "3",
+                 "MNI152_wm_mask_100_Frontal")
+
+extract_ROI_mean(input_nii$FA_MNI152, 
+                 input_nii$MNI_WM_mask_100, 
+                 input_nii$MNI_atlas, 
+                 input_nii$subject_path,
+                 "5",
+                 "MNI152_wm_mask_100_Occipital")
+
+extract_ROI_mean(input_nii$FA_MNI152, 
+                 input_nii$MNI_WM_mask_100, 
+                 input_nii$MNI_atlas, 
+                 input_nii$subject_path,
+                 "6",
+                 "MNI152_wm_mask_100_Parietal")
+
+extract_ROI_mean(input_nii$FA_MNI152, 
+                 input_nii$MNI_WM_mask_100, 
+                 input_nii$MNI_atlas, 
+                 input_nii$subject_path,
+                 "8",
+                 "MNI152_wm_mask_100_Temporal")
+
+
+```
+
+
+
+
+```{r}
+library(tidyr)
+
+roi_txt <- list.files(path = working_dir,
+           pattern = ".txt", recursive = TRUE) %>% data.frame(files = ., stringsAsFactors = FALSE) %>%
+  filter(str_detect(files, "ROI|psmd.txt") == 1)
+
+roi <- roi_txt %>%
+  separate(files, into = c("base", "subject", "session", "type", "ROI", "file"), sep = "/", fill = "left") %>%
+  cbind(roi_txt) %>%
+  filter(ROI %in% c("ROI")) %>%
+  mutate(atlas = str_extract(file, "MNI152"),
+         mask = str_extract(file, "(FA_mean|skeleton|wm)_(mask_(25|50|75|100)|mask)"),
+         region = str_extract(file, "Frontal|Parietal|Temporal|Occipital"),
+         value = unlist(lapply(roi$files, scan, what = numeric(), quiet = TRUE))) %>%
+  select(files, everything())
+
+
+read_psmd <- function(input_txt) {
+    PSMD_value <- read.delim(input_txt, stringsAsFactors = FALSE) %>% as.character(.) %>% str_extract("[:digit:]{1}.[:digit:]+")
+    return(PSMD_value)
+    }
+
+
+roi$psmd_value <- lapply(input_nii$PSMD_txt, read_psmd)
+```
+
+```{r}
+roi_wide <- roi %>%
+  select(subject, session, atlas, mask, region, value) %>%
+  spread(region, value) %>%
+  arrange(mask)
+
+```
+
+```{r}
+library(ggplot2)
+library(forcats)
+
+
+roi$mask <- fct_relevel(as.factor(roi$mask), c("FA_mean_mask", "wm_mask_25", "wm_mask_50", "wm_mask_75", "wm_mask_100", "skeleton_mask"))
+
+roi %>%
+  select(subject, session, atlas, mask, region, value) %>%
+  ggplot(aes(x = session, y = value)) +
+  geom_boxplot() +
+  facet_grid(region ~ mask)
+```
+

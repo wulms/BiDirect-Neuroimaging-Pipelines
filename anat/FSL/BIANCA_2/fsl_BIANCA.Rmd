@@ -1,0 +1,245 @@
+---
+title: "BIANCA"
+author: "Niklas Wulms"
+date: "12/9/2019"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+library(stringr)
+library(doParallel)
+library(foreach)
+library(tidyr)
+library(dplyr)
+
+source("fsl_BIANCA.R")
+source("../../tools/path_to_folder.R")
+
+knitr::opts_chunk$set(echo = TRUE)
+
+working_dir <- "/mnt/458e8a35-865f-4f0e-ab7e-8b4ac8684363/WML121_BIDS/derivatives/FSL"
+knitr::opts_knit$set(root.dir = working_dir)
+```
+
+# Here all files will be searched.
+
+```{r}
+nii_files <- data.frame(
+  # raw input and first preprocs
+  FLAIR_BET = list.files("/mnt/458e8a35-865f-4f0e-ab7e-8b4ac8684363/WML121_BIDS/derivatives/FSL/5-FSL_FLIRT/anat_FLAIR_defaced_pydeface/",
+                                             "T2_masked_0\\.(0|4)_biascorr_(fsl|py)deface_(06|12)_inverse.nii.gz", recursive = TRUE, full.names = TRUE),
+  T1_BET_to_FLAIR = list.files("/mnt/458e8a35-865f-4f0e-ab7e-8b4ac8684363/WML121_BIDS/derivatives/FSL/5-FSL_FLIRT/anat_FLAIR_defaced_pydeface/",
+                                                  "T1_0\\.(0|4)_biascorr_(fsl|py)deface_(06|12)_inverse.nii.gz", recursive = TRUE, full.names = TRUE),
+  FLAIR_to_MNI  = list.files("/mnt/458e8a35-865f-4f0e-ab7e-8b4ac8684363/WML121_BIDS/derivatives/FSL/5-FSL_FLIRT/anat_FLAIR_defaced_pydeface/", 
+                                "FLAIR_to_MNI.mat", recursive = TRUE, full.names = TRUE),
+  
+  stringsAsFactors = F)             
+
+
+
+dir.create("6-BIANCA")
+
+pydeface_06 <- nii_files %>%
+  filter(str_detect(FLAIR_BET, "pydeface_06") == 1) %>%
+  mutate(mask  = list.files("/mnt/458e8a35-865f-4f0e-ab7e-8b4ac8684363/WML121_BIDS/derivatives/FSL/5-FSL_FLIRT/manual/", 
+                                "mask_T2_space.nii.gz", recursive = TRUE, full.names = TRUE),
+         output = str_replace(FLAIR_BET, "/5-FSL_FLIRT/anat_FLAIR_defaced_pydeface/", "/6-BIANCA/") %>%
+           str_replace("_inverse", "_inverse_BIANCA_mask"),
+         id = str_extract(output, "sub-[:digit:]{5}") %>% str_extract("[:digit:]{5}"),
+         ses = str_extract(output, "ses-S[:digit:]{1}")) 
+
+```
+
+
+# Leave-One-Out txt files
+
+No output of trained models needed
+
+```{r}
+dir.create("6-BIANCA/LOO/txt_files/train", recursive = TRUE)
+
+pydeface_06 %>%
+  filter(ses == "ses-S0") %>%
+  select(FLAIR_BET, T1_BET_to_FLAIR, FLAIR_to_MNI, mask) %>%
+  write.table(file='6-BIANCA/LOO/txt_files/train/pydeface_06_S0_80_LOO.txt', 
+              quote=FALSE, sep='\t', col.names = FALSE, row.names = FALSE)
+
+pydeface_06 %>%
+  filter(ses == "ses-S4") %>%
+  select(FLAIR_BET, T1_BET_to_FLAIR, FLAIR_to_MNI, mask) %>%
+  write.table(file='6-BIANCA/LOO/txt_files/train/pydeface_06_S4_121_LOO.txt', 
+              quote=FALSE, sep='\t', col.names = FALSE, row.names = FALSE)
+
+pydeface_06 %>%
+  group_by(id) %>% count() %>% ungroup() %>% filter(n == 2) %>% left_join(pydeface_06) %>% select(-n) %>%
+  filter(ses == "ses-S4") %>%
+  select(FLAIR_BET, T1_BET_to_FLAIR, FLAIR_to_MNI, mask) %>%
+  write.table(file='6-BIANCA/LOO/txt_files/train/pydeface_06_S4_80_LOO.txt', 
+              quote=FALSE, sep='\t', col.names = FALSE, row.names = FALSE)
+
+pydeface_06 %>%
+  group_by(id) %>% count() %>% ungroup() %>% filter(n == 2) %>% left_join(pydeface_06) %>% select(-n) %>%
+  select(FLAIR_BET, T1_BET_to_FLAIR, FLAIR_to_MNI, mask) %>%
+  write.table(file='6-BIANCA/LOO/txt_files/train/pydeface_06_S0_S4_160_LOO.txt', 
+              quote=FALSE, sep='\t', col.names = FALSE, row.names = FALSE)
+
+pydeface_06 %>%
+  select(FLAIR_BET, T1_BET_to_FLAIR, FLAIR_to_MNI, mask) %>%
+  write.table(file='6-BIANCA/LOO/txt_files/train/pydeface_06_S0_S4_201_LOO.txt', 
+              quote=FALSE, sep='\t', col.names = FALSE, row.names = FALSE)
+
+```
+
+```{r}
+# Output names
+LOO_S0_80 <- pydeface_06 %>%
+  filter(ses == "ses-S0") %>%
+  select(mask) %>%
+  mutate(output = str_extract(mask, "sub-[:digit:]{5}_ses-S[:digit:]{1}_FLAIR_mask_T2_space") %>%
+           str_replace("T2_space", "model_LOO_S0_80"),
+         output = paste0(working_dir, "/6-BIANCA/LOO/txt_files/train/pydeface_06_S0_80_LOO/", output),
+         output_nii_gz = paste0(output, ".nii.gz"),
+         model = "model_LOO_S0_80")
+
+LOO_S4_80 <- pydeface_06 %>%
+  group_by(id) %>% count() %>% ungroup() %>% filter(n == 2) %>% left_join(pydeface_06) %>% select(-n) %>%
+  filter(ses == "ses-S4") %>%
+  select(mask) %>%
+  mutate(output = str_extract(mask, "sub-[:digit:]{5}_ses-S[:digit:]{1}_FLAIR_mask_T2_space") %>%
+           str_replace("T2_space", "model_LOO_S4_80"),
+         output = paste0(working_dir, "/6-BIANCA/LOO/txt_files/train/pydeface_06_S4_80_LOO/", output),
+         output_nii_gz = paste0(output, ".nii.gz"),
+         model = "model_LOO_S4_80")
+
+LOO_S0_S4_160 <- pydeface_06 %>%
+  group_by(id) %>% count() %>% ungroup() %>% filter(n == 2) %>% left_join(pydeface_06) %>% select(-n) %>%
+  select(mask) %>%
+  mutate(output = str_extract(mask, "sub-[:digit:]{5}_ses-S[:digit:]{1}_FLAIR_mask_T2_space") %>%
+           str_replace("T2_space", "model_LOO_S0_S4_160"),
+         output = paste0(working_dir, "/6-BIANCA/LOO/txt_files/train/pydeface_06_S0_S4_160_LOO/", output),
+         output_nii_gz = paste0(output, ".nii.gz"),
+         model = "model_LOO_S0_S4_160")
+
+LOO_S4_121 <- pydeface_06 %>%
+  filter(ses == "ses-S4") %>%
+  select(mask) %>%
+  mutate(output = str_extract(mask, "sub-[:digit:]{5}_ses-S[:digit:]{1}_FLAIR_mask_T2_space") %>%
+           str_replace("T2_space", "model_LOO_S4_121"),
+         output = paste0(working_dir, "/6-BIANCA/LOO/txt_files/train/pydeface_06_S4_121_LOO/", output),
+         output_nii_gz = paste0(output, ".nii.gz"),
+         model = "model_LOO_S4_121")
+
+LOO_S0_S4_201 <- pydeface_06 %>%
+  select(mask) %>%
+  mutate(output = str_extract(mask, "sub-[:digit:]{5}_ses-S[:digit:]{1}_FLAIR_mask_T2_space") %>%
+           str_replace("T2_space", "model_LOO_S0_S4_201"),
+         output = paste0(working_dir, "/6-BIANCA/LOO/txt_files/train/pydeface_06_S0_S4_201_LOO/", output),
+         output_nii_gz = paste0(output, ".nii.gz"),
+         model = "model_LOO_S0_S4_201")
+
+
+merged_LOO <- rbind(LOO_S0_80, LOO_S4_80, LOO_S4_121, LOO_S0_S4_160, LOO_S0_S4_201)
+```
+
+# Calculate the models
+```{r}
+bianca_r('6-BIANCA/LOO/txt_files/train/pydeface_06_S0_80_LOO.txt', 
+         output = LOO_S0_80$output)
+bianca_r('6-BIANCA/LOO/txt_files/train/pydeface_06_S4_80_LOO.txt', 
+         LOO_S4_80$output)
+bianca_r('6-BIANCA/LOO/txt_files/train/pydeface_06_S4_121_LOO.txt', 
+         LOO_S4_121$output)
+bianca_r('6-BIANCA/LOO/txt_files/train/pydeface_06_S0_S4_160_LOO.txt', 
+         LOO_S0_S4_160$output)
+bianca_r('6-BIANCA/LOO/txt_files/train/pydeface_06_S0_S4_201_LOO.txt', 
+         LOO_S0_S4_201$output, cores_not_used = 10)
+```
+
+Adding tables and combining with the thresholds
+
+```{r}
+thresh <- seq(0.0, 1, 0.1)
+thresh
+
+# merged_LOO %>% unique()
+
+merged_LOO_expand <- merged_LOO %>% 
+  mutate(subject = str_extract(output, "sub-[:digit:]{5}"),
+         session = str_extract(output, "ses-S[:digit:]{1}")) %>%
+  group_by_all() %>% 
+  expand(thresh) %>% ungroup() %>%
+  mutate(output_volume_file = paste0(output, "_bianca_volume_thresh_", thresh, ".txt"),
+         output_performance_file = paste0(output, "_bianca_performance_thresh_", thresh, ".txt"))
+```
+
+
+
+# Write out the mask volumes
+
+```{r}
+bianca_cluster_info(lesionmask = merged_LOO_expand$output_nii_gz, 
+                    threshold = merged_LOO_expand$thresh,
+                    output_name = merged_LOO_expand$output_volume_file)
+```
+
+```{r}
+bianca_performance(lesionmask = merged_LOO_expand$output, 
+                   threshold = merged_LOO_expand$thresh, 
+                   manualmask = merged_LOO_expand$mask,
+                   output_name = merged_LOO_expand$output_performance_file)
+```
+
+# Read out the quality metrices of each model
+
+```{r}
+#merged_LOO_expand$performance_string <-scan(merged_LOO_expand$output_performance_file, what="character")
+
+for (i in 1:length(merged_LOO_expand$output_performance_file)) {
+  string <- paste0(scan(merged_LOO_expand$output_performance_file[i], what="character"), collapse=" ")
+  cat("\014")
+  print(paste0(i, " of ", length(merged_LOO_expand$output_performance_file)))
+  merged_LOO_expand$performance_string[i] <- string
+  
+}
+```
+
+
+
+
+
+# Models 2: General models
+
+
+S0_80 - applied to S4
+S4_80 - applied to S0 and S4-41
+S4_121 - applied to S0
+
+```{r}
+pydeface_06 %>%
+  filter(ses == "ses-S0") %>%
+  select(FLAIR_BET, T1_BET_to_FLAIR, FLAIR_to_MNI, mask) %>%
+  write.table(file='6-BIANCA/pydeface_06_S0.txt', quote=FALSE, sep='\t', col.names = FALSE, row.names = FALSE)
+
+pydeface_06 %>%
+  filter(ses == "ses-S4") %>%
+  select(FLAIR_BET, T1_BET_to_FLAIR, FLAIR_to_MNI, mask) %>%
+  write.table(file='6-BIANCA/pydeface_06_S4_121.txt', quote=FALSE, sep='\t', col.names = FALSE, row.names = FALSE)
+
+pydeface_06 %>%
+  group_by(id) %>% count() %>% ungroup() %>% filter(n == 2) %>% left_join(pydeface_06) %>% select(-n) %>%
+  filter(ses == "ses-S4") %>%
+  select(FLAIR_BET, T1_BET_to_FLAIR, FLAIR_to_MNI, mask) %>%
+  write.table(file='6-BIANCA/pydeface_06_S4_80.txt', quote=FALSE, sep='\t', col.names = FALSE, row.names = FALSE)
+```
+
+## Apply these models
+
+```{r}
+
+```
+
+
+
+# Models 3: Benchmark models
+
+

@@ -1,0 +1,247 @@
+---
+title: "Preprocessing_QC"
+author: "Niklas Wulms"
+date: "10/16/2019"
+output: html_document
+---
+```{r setup, include=FALSE}
+library(stringr)
+library(doParallel)
+library(foreach)
+library(tidyr)
+library(dplyr)
+
+source("../2-image_quality/qc_fsleyes.R")
+source("../tools/path_to_folder.R")
+
+knitr::opts_chunk$set(echo = TRUE)
+
+working_dir <- "/mnt/458e8a35-865f-4f0e-ab7e-8b4ac8684363/WML121_BIDS"
+
+knitr::opts_knit$set(root.dir = working_dir)
+
+setwd(working_dir)
+```
+
+
+## Selection of the most disturbed patient preprocessings (seen above)
+
+patient 30060, 30071, 30135, 30067
+
+```{r}
+
+derivatives_dir <- paste0(working_dir, "/derivatives/FSL/3-FSL_pipeline/")
+
+fsl_anat_nii_selection <- data.frame(
+  # raw input and first preprocs
+  T1_biascorr = list.files(derivatives_dir, "T1_biascorr.nii.gz", recursive = TRUE, full.names = TRUE),
+  T1_brain_mask = list.files(derivatives_dir, "T1_biascorr_brain_mask.nii.gz", recursive = TRUE, full.names = TRUE),
+  stringsAsFactors = F) %>%
+  mutate(id = str_extract(T1_biascorr, "sub-[:digit:]{5}")) %>%
+  mutate(output = str_replace(T1_brain_mask, "//", "/") %>% str_replace("derivatives/FSL/3-FSL_pipeline/", "qualitycontrol/3-fsl_anat_selection/") %>%
+           str_replace("/(?=sub-[:digit:]{5})", "_") %>% str_replace("/(?=ses-S[:digit:]{1})", "_") %>% str_replace("/anat.anat/", "_") %>% str_replace("nii.gz", "png")
+           
+           )
+
+```
+
+```{r}
+dir.create("/media/niklas/spaceC/WML121_BIDS/qualitycontrol/3-fsl_anat_selection")
+
+qc_fsleyes_defacing_1(fsl_anat_nii_selection$T1_biascorr, fsl_anat_nii_selection$T1_brain_mask,
+                      output_t1 = fsl_anat_nii_selection$output,
+                      slice_spacing = 6.5)
+```
+
+
+```{r}
+fsl_anat_selection_pngs <- data.frame(
+  pngs = list.files(paste0(working_dir, "/qualitycontrol/3-fsl_anat_selection"), "png", recursive = TRUE, full.names = TRUE),
+  stringsAsFactors = FALSE
+)
+```
+
+```{r}
+fsl_anat_selection_pngs <- fsl_anat_selection_pngs %>%
+  mutate(id = str_extract(pngs, "sub-[:digit:]{5}"),
+         ses = str_extract(pngs, "ses-S[:digit:]{1}"),
+         sequence = str_extract(pngs, "[:graph:]*(?=_sub-[:digit:]{5})") %>% str_replace(paste0(working_dir, "/qualitycontrol/3-fsl_anat_selection/anat_"), "") %>% as.factor()
+  )
+
+test <- fsl_anat_selection_pngs %>%
+  pivot_wider(names_from = sequence, values_from = pngs) %>%
+  mutate(out = paste0(id, "_", ses, ".png"))
+```
+
+
+```{r}
+setwd("qualitycontrol/3-fsl_anat_selection")
+
+collage_nine(test$T1, test$T1_defaced_mri_deface, test$T1_defaced_pydeface,
+             test$T1_reorient2std, test$T1_r2std_defaced_mri_deface, test$T1_r2std_defaced_pydeface,
+             test$T1_crop, test$T1_cropped_defaced_mri_deface, test$T1_cropped_defaced_pydeface,
+             test$out, h_res = TRUE, l_res = TRUE)
+```
+
+
+# Sven Niklas Idee
+
+```{r}
+fsl_anat_nii_selection <- fsl_anat_nii_selection %>%
+  select(T1_brain_mask, id) %>%
+  mutate(session = str_extract(T1_brain_mask, "ses-S(0|4)"))
+
+fsl_anat_nii_selection$voxel_volume <- lapply(fsl_anat_nii_selection$T1_brain_mask, mask_volume)
+
+
+fsl_anat_nii_selection$voxel_n <- str_extract(fsl_anat_nii_selection$voxel_volume, "^[:digit:]+(?= )") %>% as.numeric()
+fsl_anat_nii_selection$volume <- str_extract(fsl_anat_nii_selection$voxel_volume, "(?<= )[:digit:]+\\.[:digit:]+") %>% as.numeric()
+
+```
+
+
+```{r}
+library(forcats)
+mask_madness <- fsl_anat_nii_selection %>%
+  select(T1_brain_mask, id, session, voxel_n) %>%
+  mutate(pipeline = str_extract(T1_brain_mask, "anat_[:graph:]+(?=/sub)") %>% str_replace("anat_", ""),
+         type = str_replace(pipeline, "^T1$|T1_defaced_(mri_|py)deface$", "raw"),
+         type = str_replace(type, "^T1_reorient2std$|T1_r2std_defaced_(mri_|py)deface$", "reorient"),
+         type = str_replace(type, "^T1_crop$|T1_cropped_defaced_(mri_|py)deface$",  "cropped"),
+         defacing = str_replace(pipeline, "^T(1|1_crop|1_reorient2std)$", "T1"),
+         defacing = str_replace(defacing, "^T(1|1_cropped|1_r2std)_defaced_mri_deface$", "MRI_deface"),
+         defacing = str_replace(defacing, "^T(1|1_cropped|1_r2std)_defaced_pydeface$", "Pydeface"),
+         type = fct_relevel(type, c("raw", "reorient", "cropped")),
+         defacing = fct_relevel(defacing, c("T1", "MRI_deface", "Pydeface"))) 
+
+unique(mask_madness$type)
+```
+
+
+
+```{r}
+library(ggplot2)
+
+mask_madness %>%
+  ggplot(aes(x = session, y = voxel_n)) +
+  geom_boxplot() +
+  facet_grid(type ~ defacing)
+```
+
+## Mean mask calculation
+
+- add all masks up (voxel values of 0 - 9 )
+- multiply end mask with 0.9
+
+
+```{r}
+mask_madness_input <- mask_madness %>% 
+  select(id, session, pipeline, T1_brain_mask) %>%
+  spread(pipeline, T1_brain_mask) %>%
+  mutate(output_native = paste0("/mnt/458e8a35-865f-4f0e-ab7e-8b4ac8684363/WML121_BIDS/derivatives/FSL/3-FSL_pipeline//mean_masks/", id, "_", session, "_mean_mask_native.nii.gz"),
+         output_cropped = paste0("/mnt/458e8a35-865f-4f0e-ab7e-8b4ac8684363/WML121_BIDS/derivatives/FSL/3-FSL_pipeline//mean_masks/", id, "_", session, "_mean_mask_cropped.nii.gz"),
+         output = paste0("/mnt/458e8a35-865f-4f0e-ab7e-8b4ac8684363/WML121_BIDS/derivatives/FSL/3-FSL_pipeline//mean_masks/means/", id, "_", session, "_mean_mask_cropped.nii.gz"),
+         flirt_output = paste0("/mnt/458e8a35-865f-4f0e-ab7e-8b4ac8684363/WML121_BIDS/derivatives/FSL/3-FSL_pipeline//mean_masks/flirt/", id, "_", session, "_mean_mask_flirt.nii.gz"),
+         #subtract_1 = paste0("/mnt/458e8a35-865f-4f0e-ab7e-8b4ac8684363/WML121_BIDS/derivatives/FSL/3-FSL_pipeline//mean_masks/means_subtract_brain/", id, "_", session, "_mean_mask_subtract_brain.nii.gz"),
+         differences = paste0("/mnt/458e8a35-865f-4f0e-ab7e-8b4ac8684363/WML121_BIDS/derivatives/FSL/3-FSL_pipeline//mean_masks/means_thresholded/", id, "_", session, "_mean_mask_diffs.nii.gz"),
+         definite_brain = paste0("/mnt/458e8a35-865f-4f0e-ab7e-8b4ac8684363/WML121_BIDS/derivatives/FSL/3-FSL_pipeline//mean_masks/means_brain/", id, "_", session, "_definite_mask_brains.nii.gz"),
+         normalized = paste0("/mnt/458e8a35-865f-4f0e-ab7e-8b4ac8684363/WML121_BIDS/derivatives/FSL/3-FSL_pipeline//mean_masks/means_normalized/", id, "_", session, "_normalized_mean_mask.nii.gz"))
+
+dir.create("/mnt/458e8a35-865f-4f0e-ab7e-8b4ac8684363/WML121_BIDS/derivatives/FSL/3-FSL_pipeline//mean_masks/")
+dir.create("/mnt/458e8a35-865f-4f0e-ab7e-8b4ac8684363/WML121_BIDS/derivatives/FSL/3-FSL_pipeline//mean_masks/flirt/")
+dir.create("/mnt/458e8a35-865f-4f0e-ab7e-8b4ac8684363/WML121_BIDS/derivatives/FSL/3-FSL_pipeline//mean_masks/means_thresholded/")
+dir.create("/mnt/458e8a35-865f-4f0e-ab7e-8b4ac8684363/WML121_BIDS/derivatives/FSL/3-FSL_pipeline//mean_masks/means_subtract_brain/")
+dir.create("/mnt/458e8a35-865f-4f0e-ab7e-8b4ac8684363/WML121_BIDS/derivatives/FSL/3-FSL_pipeline//mean_masks/means_brain/")
+dir.create("/mnt/458e8a35-865f-4f0e-ab7e-8b4ac8684363/WML121_BIDS/derivatives/FSL/3-FSL_pipeline//mean_masks/means_normalized/")
+
+
+
+
+
+mask_madness_input
+
+
+
+create_mean_mask_native(mask_madness_input$T1, 
+                        mask_madness_input$T1_reorient2std, 
+                        mask_madness_input$T1_defaced_mri_deface, 
+                        mask_madness_input$T1_defaced_pydeface,
+                        mask_madness_input$T1_r2std_defaced_mri_deface, 
+                        mask_madness_input$T1_r2std_defaced_pydeface,
+                        output = mask_madness_input$output_native)
+
+create_mean_mask_cropped(mask_madness_input$T1_crop,
+                         mask_madness_input$T1_cropped_defaced_mri_deface,
+                         mask_madness_input$T1_cropped_defaced_pydeface,
+                         mask_madness_input$output_cropped)
+
+
+
+
+```
+
+# Problem T1 is another space, than reorient2std
+```{r}
+dir.create("/media/niklas/spaceC/WML121_BIDS/derivatives/FSL/3-FSL_pipeline//mean_masks/flirt/")
+
+flirt_files(mask_madness_input$output_native,
+            mask_madness_input$output_cropped,
+            mask_madness_input$flirt_output)
+```
+
+```{r}
+dir.create("/media/niklas/spaceC/WML121_BIDS/derivatives/FSL/3-FSL_pipeline//mean_masks/means/")
+
+create_mean_mask(mask_madness_input$output_cropped,
+                 mask_madness_input$flirt_output,
+                 mask_madness_input$output)
+
+
+
+```
+
+# Now the masks exists (values between 0, 1 and 9)
+
+ now we "threshold" the map, so that 9 is removed (so every region where every algorithm detected brain tissue)
+
+```{r}
+# standardize image
+divide_number(mask_madness_input$output, 9, mask_madness_input$normalized )
+
+
+dir.create("/media/niklas/spaceC/WML121_BIDS/derivatives/FSL/3-FSL_pipeline//mean_masks/means_thresholded/")
+
+
+# 
+threshold(mask_madness_input$normalized, 0, 0.95, mask_madness_input$differences)
+threshold(mask_madness_input$normalized, 0.95, 1, mask_madness_input$definite_brain)
+```
+
+
+
+
+```{r}
+mask_madness_stats <- mask_madness_input %>%
+  select(id, session, normalized, differences, definite_brain) %>%
+  mutate(normalized_mean = lapply(normalized, mask_mean) %>% unlist() %>% as.numeric,
+         normalized_sd = lapply(normalized, mask_sd) %>% unlist() %>% as.numeric,
+         
+         differences_mean = lapply(differences, mask_mean) %>% unlist() %>% as.numeric,
+         differences_sd = lapply(differences, mask_sd) %>% unlist() %>% as.numeric)
+
+
+
+mask_madness_stats$normalized_volume <- lapply(mask_madness_stats$normalized, mask_volume)
+mask_madness_stats$normalized_voxel_n <- str_extract(mask_madness_stats$normalized_volume, "^[:digit:]+(?= )") %>% as.numeric()
+
+mask_madness_stats$differences_volume <- lapply(mask_madness_stats$differences, mask_volume)
+mask_madness_stats$differences_voxel_n <- str_extract(mask_madness_stats$differences_volume, "^[:digit:]+(?= )") %>% as.numeric()
+
+mask_madness_stats$definite_brain_volume <- lapply(mask_madness_stats$definite_brain, mask_volume)
+mask_madness_stats$definite_brain_voxel_n <- str_extract(mask_madness_stats$definite_brain_volume, "^[:digit:]+(?= )") %>% as.numeric()
+
+save(mask_madness_stats, file = "mask_madness_stats.Rdata")
+
+```
+
+
